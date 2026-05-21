@@ -118,7 +118,7 @@ impl Default for Config {
                 "anthropic/claude-sonnet-4".to_string(),
                 "https://openrouter.ai".to_string(),
             ),
-            "amni" => (String::new(), "http://127.0.0.1:8787".to_string()),
+            "amni" => (String::new(), "http://127.0.0.1:7700".to_string()),
             "ollama" => (String::new(), "http://localhost:11434".to_string()),
             "local" => (String::new(), "http://localhost:11434".to_string()),
             _ => (
@@ -151,6 +151,30 @@ impl Default for Config {
                 .into(),
             model_dir,
         }
+    }
+}
+fn amni_base_url(base_url: &str) -> String {
+    let trimmed = base_url.trim_end_matches('/');
+    if trimmed.is_empty() || trimmed.contains(":8787") || trimmed.contains(":8001") || trimmed.contains(":8002") {
+        "http://127.0.0.1:7700".to_string()
+    } else {
+        trimmed.to_string()
+    }
+}
+fn normalize_config(cfg: &mut Config) {
+    cfg.base_url = if cfg.provider == "amni" {
+        amni_base_url(&cfg.base_url)
+    } else {
+        cfg.base_url.trim_end_matches('/').to_string()
+    };
+}
+fn persist_config(cfg: &Config) {
+    let config_path = dirs::home_dir()
+        .map(|h| h.join(".amni").join("config.json"))
+        .unwrap_or_default();
+    if let Ok(json) = serde_json::to_string(cfg) {
+        let _ = std::fs::create_dir_all(config_path.parent().unwrap());
+        let _ = std::fs::write(&config_path, json);
     }
 }
 const TOOLS_JSON: &str = r#"[
@@ -513,7 +537,7 @@ async fn llm_request(
     let (url, key_header) = match config.provider.as_str() {
         "ollama" => (format!("{}/v1/chat/completions", config.base_url), None),
         "local" => (format!("{}/v1/chat/completions", config.base_url), None),
-        "amni" => (format!("{}/v1/chat/completions", config.base_url.trim_end_matches('/')), None),
+        "amni" => (format!("{}/v1/chat/completions", amni_base_url(&config.base_url)), None),
         "openai" => (
             format!("{}/v1/chat/completions", config.base_url.trim_end_matches('/')),
             Some(("Authorization", format!("Bearer {}", config.api_key))),
@@ -526,10 +550,7 @@ async fn llm_request(
             "https://api.x.ai/v1/chat/completions".into(),
             Some(("Authorization", format!("Bearer {}", config.api_key))),
         ),
-        "google" => (
-            "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions".into(),
-            Some(("Authorization", format!("Bearer {}", config.api_key))),
-        ),
+        "google" => ("dummy".into(), None),
         "deepseek" => (
             "https://api.deepseek.com/chat/completions".into(),
             Some(("Authorization", format!("Bearer {}", config.api_key))),
@@ -564,6 +585,26 @@ async fn llm_request(
         ),
         other => return Err((format!("Unknown provider: {}", other), false)),
     };
+    if config.provider == "google" {
+        let prompt = messages.iter().filter_map(|m| {
+            let role = m["role"].as_str().unwrap_or("");
+            let content = m["content"].as_str().unwrap_or("");
+            Some(format!("{}: {}", role, content))
+        }).collect::<Vec<_>>().join("\n");
+        let url = format!("https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent?key={}", config.model, config.api_key);
+        let body = serde_json::json!({"contents": [{"parts": [{"text": prompt}]}]});
+        let client = reqwest::Client::new();
+        let resp = client.post(&url).header("Content-Type", "application/json").json(&body).send().await.map_err(|e| (format!("Request failed: {}", e), false))?;
+        let status = resp.status();
+        let text = resp.text().await.map_err(|e| (format!("Read failed: {}", e), false))?;
+        if !status.is_success() {
+            return Err((format!("API error {}: {}", status, &text[..text.len().min(500)]), false));
+        }
+        let json: serde_json::Value = serde_json::from_str(&text).map_err(|e| (format!("Parse error: {}", e), false))?;
+        let content = json["candidates"][0]["content"]["parts"][0]["text"].as_str().unwrap_or("").to_string();
+        let raw_msg = serde_json::json!({"role": "assistant", "content": content});
+        return Ok((raw_msg, Vec::new()));
+    }
     let mut body =
         serde_json::json!({"model": config.model, "messages": messages, "max_tokens": 4096});
     if use_tools {
@@ -763,7 +804,13 @@ let sid=req.session_id.unwrap_or_else(||uuid::Uuid::new_v4().to_string());let(tx
         .keep_alive(KeepAlive::new().interval(std::time::Duration::from_secs(15)))
 }
 async fn handle_config_get(State(app): State<App>) -> Json<Config> {
-    Json(app.config.lock().await.clone())
+    let mut cfg = app.config.lock().await;
+    let base_before = cfg.base_url.clone();
+    normalize_config(&mut cfg);
+    if cfg.base_url != base_before {
+        persist_config(&cfg);
+    }
+    Json(cfg.clone())
 }
 async fn handle_config_set(State(app): State<App>, Json(req): Json<ConfigReq>) -> Json<Config> {
     let mut cfg = app.config.lock().await;
@@ -789,13 +836,8 @@ async fn handle_config_set(State(app): State<App>, Json(req): Json<ConfigReq>) -
     if let Some(v) = req.model_dir {
         cfg.model_dir = v;
     }
-    let config_path = dirs::home_dir()
-        .map(|h| h.join(".amni").join("config.json"))
-        .unwrap_or_default();
-    if let Ok(json) = serde_json::to_string(&*cfg) {
-        let _ = std::fs::create_dir_all(config_path.parent().unwrap());
-        let _ = std::fs::write(&config_path, json);
-    }
+    normalize_config(&mut cfg);
+    persist_config(&cfg);
     Json(cfg.clone())
 }
 #[derive(Deserialize)]
@@ -879,33 +921,66 @@ fn find_amni_ai_dir(config: &Config) -> Option<PathBuf> {
     }
     None
 }
+async fn stop_managed_server(app:&App)->bool{
+    let mut guard=app.amni_proc.lock().await;
+    let child=guard.take();
+    drop(guard);
+    if let Some(mut child)=child{
+        let _=child.start_kill();
+        let _=child.wait().await;
+        true
+    }else{false}
+}
+async fn probe_server_health(client:&reqwest::Client,base:&str)->(bool,Option<String>){
+    match client.get(format!("{}/health",base)).send().await{
+        Ok(resp)=>{if !resp.status().is_success(){return(false,None);}match resp.json::<serde_json::Value>().await{Ok(json)=>(true,json["active_model"].as_str().map(|s|s.to_string())),Err(_)=>(true,None)}},
+        Err(_)=>(false,None),
+    }
+}
 async fn handle_server_status(State(app): State<App>) -> Json<serde_json::Value> {
     let cfg = app.config.lock().await.clone();
     let local_providers = ["amni", "local", "ollama"];
     if !local_providers.contains(&cfg.provider.as_str()) {
         return Json(serde_json::json!({"running": true, "applicable": false}));
     }
-    let base = if cfg.provider == "amni" { "http://127.0.0.1:8787".to_string() } else { cfg.base_url.trim_end_matches('/').to_string() };
+    let base = if cfg.provider == "amni" { amni_base_url(&cfg.base_url) } else { cfg.base_url.trim_end_matches('/').to_string() };
     let client = reqwest::Client::builder().timeout(std::time::Duration::from_secs(2)).build().unwrap_or_default();
-    let running = client.get(format!("{}/health", base)).send().await.map(|r| r.status().is_success()).unwrap_or(false);
+    let (reachable,active_model)=if cfg.provider=="amni"{probe_server_health(&client,&base).await}else{(client.get(format!("{}/health", base)).send().await.map(|r| r.status().is_success()).unwrap_or(false),None)};
+    let desired_model=if cfg.provider=="amni"{if cfg.model.trim().is_empty(){"amni-a1".to_string()}else{cfg.model.clone()}}else{cfg.model.clone()};
+    let matches_model=if cfg.provider=="amni" && reachable{active_model.as_deref()==Some(desired_model.as_str())}else{true};
+    let running = reachable && matches_model;
     let proc_running = app.amni_proc.lock().await.is_some();
-    Json(serde_json::json!({"running": running, "starting": proc_running && !running, "applicable": true, "provider": cfg.provider}))
+    Json(serde_json::json!({"running": running, "reachable": reachable, "matching": matches_model, "active_model": active_model, "desired_model": desired_model, "starting": proc_running && !running, "applicable": true, "provider": cfg.provider}))
 }
 async fn handle_server_start(State(app): State<App>) -> Json<serde_json::Value> {
     let cfg = app.config.lock().await.clone();
     if cfg.provider != "amni" && cfg.provider != "local" {
         return Json(serde_json::json!({"status": "not_applicable"}));
     }
-    let base = if cfg.provider == "amni" { "http://127.0.0.1:8787".to_string() } else { cfg.base_url.trim_end_matches('/').to_string() };
+    let base = if cfg.provider == "amni" { amni_base_url(&cfg.base_url) } else { cfg.base_url.trim_end_matches('/').to_string() };
     let client = reqwest::Client::builder().timeout(std::time::Duration::from_secs(2)).build().unwrap_or_default();
-    if client.get(format!("{}/health", base)).send().await.map(|r| r.status().is_success()).unwrap_or(false) {
+    let tx = app.server_log_tx.clone();
+    let desired_model=if cfg.provider=="amni"{if cfg.model.trim().is_empty(){"amni-a1".to_string()}else{cfg.model.clone()}}else{cfg.model.clone()};
+    if cfg.provider=="amni"{
+        let (reachable,active_model)=probe_server_health(&client,&base).await;
+        if reachable && active_model.as_deref()==Some(desired_model.as_str()) {
+            return Json(serde_json::json!({"status": "already_running", "active_model": active_model, "desired_model": desired_model}));
+        }
+        if reachable {
+            if app.amni_proc.lock().await.is_some() {
+                let _ = tx.send(format!("Restarting Amni-AI for selected model: {}", desired_model));
+                let _ = stop_managed_server(&app).await;
+            } else {
+                return Json(serde_json::json!({"status": "error", "message": format!("Amni-AI is already running with model '{}' but '{}' is selected. Stop the external Amni-AI process or let Amni-Code launch it.", active_model.unwrap_or_else(|| "unknown".to_string()), desired_model)}));
+            }
+        }
+    } else if client.get(format!("{}/health", base)).send().await.map(|r| r.status().is_success()).unwrap_or(false) {
         return Json(serde_json::json!({"status": "already_running"}));
     }
     // Resolve command before acquiring the proc lock (avoid holding mutex across awaits)
     if app.amni_proc.lock().await.is_some() {
         return Json(serde_json::json!({"status": "already_starting"}));
     }
-    let tx = app.server_log_tx.clone();
     enum LaunchTarget { LlamaServer(PathBuf, u16), AmniAI(PathBuf) }
     let target: LaunchTarget = if cfg.provider == "local" {
         let model_dir = if !cfg.model_dir.is_empty() {
@@ -951,7 +1026,7 @@ async fn handle_server_start(State(app): State<App>) -> Json<serde_json::Value> 
         LaunchTarget::AmniAI(d) => {
             let _ = tx.send(format!("Starting Amni-AI from: {}", d.display()));
             let mut c = tokio::process::Command::new("python");
-            c.args(["-m", "amni.web.server"]).current_dir(&d).stdout(Stdio::piped()).stderr(Stdio::piped());
+            c.args(["-m", "amni.web.server", "--model", desired_model.as_str()]).current_dir(&d).stdout(Stdio::piped()).stderr(Stdio::piped());
             c
         }
     };
@@ -1236,12 +1311,14 @@ async fn handle_models(State(app): State<App>) -> Json<ModelsRes> {
     } else if cfg.provider == "openrouter" {
         models.extend(["openai/gpt-4o","anthropic/claude-sonnet-4","google/gemini-2.5-pro","meta-llama/llama-3.3-70b-instruct","deepseek/deepseek-r1"].iter().map(|s| s.to_string()));
     } else if cfg.provider == "amni" {
-        let amni_base = if base.contains("8787") || base.contains("amni") { base.clone() } else { "http://127.0.0.1:8787".to_string() };
+        let amni_base = amni_base_url(&base);
         if let Ok(resp) = client.get(format!("{}/v1/models", amni_base)).send().await {
             if let Ok(json) = resp.json::<serde_json::Value>().await {
                 if let Some(arr) = json["data"].as_array() {
                     for m in arr {
-                        if let Some(id) = m["id"].as_str() { models.push(id.to_string()); }
+                        if m["available"].as_bool().unwrap_or(true) {
+                            if let Some(id) = m["id"].as_str() { models.push(id.to_string()); }
+                        }
                     }
                 }
             }
@@ -1438,10 +1515,11 @@ async fn ensure_model_loaded(config: &Config) {
         config.model,
         model_path
     );
-    let modelfile = format!("FROM {}", model_path.display());
+    let canonical_path = model_path.canonicalize().unwrap_or(model_path);
+    let path_str = canonical_path.display().to_string().replace('\\', "/");
     match client
         .post(format!("{}/api/create", base))
-        .json(&serde_json::json!({"model": config.model, "modelfile": modelfile, "stream": false}))
+        .json(&serde_json::json!({"model": config.model, "from": path_str, "stream": false}))
         .send()
         .await
     {
@@ -1458,6 +1536,7 @@ async fn ensure_model_loaded(config: &Config) {
 async fn auto_detect_model_dir(working_dir: &str) -> Option<PathBuf> {
     let candidates = [
         PathBuf::from(working_dir).join("models"),
+        PathBuf::from(working_dir).join("Amni-Ai").join("models"),
         PathBuf::from(working_dir)
             .parent()
             .map(|p| p.join("models"))
@@ -1868,6 +1947,9 @@ async fn main() -> anyhow::Result<()> {
     } else {
         Config::default()
     };
+    let base_before = config.base_url.clone();
+    normalize_config(&mut config);
+    if config.base_url != base_before { persist_config(&config); }
     if config.working_dir.is_empty() { config.working_dir = cwd.to_string_lossy().into(); }
     // CLI arg: first non-flag argument sets working directory
     let cli_dir: Option<String> = std::env::args().skip(1).find(|a| !a.starts_with('-') && std::fs::metadata(a).map(|m| m.is_dir()).unwrap_or(false));

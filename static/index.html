@@ -106,6 +106,25 @@ a:hover{opacity:.8}
 .msg.assistant pre{background:var(--bg);padding:12px;border-radius:8px;overflow-x:auto;margin:8px 0;font-family:var(--font);font-size:13px;line-height:1.5}
 .msg.assistant code{font-family:var(--font);font-size:13px;background:var(--bg);padding:2px 6px;border-radius:4px}
 .msg.assistant pre code{background:none;padding:0}
+.amni-widget{margin-top:10px;padding:10px 12px;border:1px solid var(--accent-glow);border-radius:6px;background:var(--accent-dim);box-shadow:0 0 12px var(--accent-glow)}
+.amni-widget .w-head{font-size:10px;letter-spacing:.2em;text-transform:uppercase;color:var(--accent);margin-bottom:6px;display:flex;align-items:center;gap:6px}
+.amni-widget .w-head .icon{font-size:13px}
+.amni-widget .w-body{font-size:13px;color:var(--text);line-height:1.5}
+.amni-widget.weather .temp{font-size:22px;color:var(--accent);font-weight:600;margin:2px 0}
+.amni-widget.weather .meta{font-size:11px;color:var(--text2);margin-top:4px}
+.amni-widget.system .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:6px;margin-top:4px}
+.amni-widget.system .stat{padding:4px 6px;border:1px solid var(--border);border-radius:4px;font-size:11px}
+.amni-widget.system .stat .v{color:var(--accent);font-size:14px;font-weight:600}
+.amni-widget.news a{display:block;color:var(--text);text-decoration:none;padding:4px 6px;border-radius:3px;font-size:12px;margin-bottom:2px}
+.amni-widget.news a:hover{background:var(--accent-dim);color:var(--accent)}
+.amni-widget.news .src{font-size:9px;color:var(--text2);letter-spacing:.1em;text-transform:uppercase;margin-left:4px}
+.amni-widget.stock .row{display:flex;justify-content:space-between;padding:3px 6px;font-family:var(--font);font-size:12px}
+.amni-widget.stock .row .chg.up{color:#3ddc84}
+.amni-widget.stock .row .chg.down{color:var(--error)}
+.amni-widget.git .branch{font-weight:600;color:var(--accent)}
+.amni-widget.git .commits{font-family:var(--font);font-size:11px;color:var(--text2);margin-top:4px;line-height:1.5}
+.amni-widget.error{border-color:var(--error);background:rgba(255,68,68,.08)}
+.amni-widget.error .w-head{color:var(--error)}
 .msg.system{align-self:center;background:transparent;color:var(--dim);font-size:13px;text-align:center;padding:8px}
 .tool-badge{display:inline-flex;align-items:center;gap:4px;font-size:11px;padding:3px 8px;border-radius:6px;margin:2px 4px 2px 0;font-family:var(--font)}
 .tool-badge.success{background:#3ddc8422;color:#3ddc84;border:1px solid #3ddc8433}
@@ -533,7 +552,36 @@ function renderMd(text){
     .replace(/(https?:\/\/[^\s<"']+[^<.,:;"')\]\s])/g, '<a href="$1" target="_blank" rel="noopener" style="color:var(--accent);text-decoration:underline">$1</a>')
     .replace(/([^\s<"']+@[^\s<"']+\.[^\s<"']+)/g, '<a href="mailto:$1" style="color:var(--accent);text-decoration:underline">$1</a>');
 }
-function addMsg(role, content, tools){
+function renderWidget(w){
+  if(!w||!w.type)return '';
+  const t=w.type;const d=w.data||{};const title=escHtml(w.title||t);const icon=escHtml(w.icon||({weather:'☁',system:'⚙',time:'⧗',news:'▤',stock:'▲',code:'<>',file:'·',git:'⎇',disk:'▢',watch:'□',error:'!',info:'i'}[t]||'◆'));
+  const head=`<div class="w-head"><span class="icon">${icon}</span><span>${title}</span></div>`;
+  let body='';
+  if(t==='weather'){
+    body=`<div class="temp">${d.temp_c!=null?Math.round(d.temp_c):'?'}°C</div><div>${escHtml(d.description||'')} · ${escHtml(d.location||'')}</div><div class="meta">HI ${d.high_c!=null?Math.round(d.high_c):'?'}° · LO ${d.low_c!=null?Math.round(d.low_c):'?'}° · ${d.humidity_pct||'?'}% humid</div>`;
+  }else if(t==='system'){
+    body=`<div class="grid">${d.cpu_pct!=null?`<div class="stat">CPU<div class="v">${d.cpu_pct}%</div></div>`:''}${d.mem_pct!=null?`<div class="stat">MEM<div class="v">${d.mem_pct}%</div></div>`:''}${d.disk_pct!=null?`<div class="stat">DISK<div class="v">${d.disk_pct}%</div></div>`:''}${d.gpu_name?`<div class="stat">GPU<div class="v" style="font-size:11px">${escHtml(d.gpu_name.slice(0,18))}</div></div>`:''}</div>`;
+  }else if(t==='time'){
+    body=`<div style="font-size:18px;color:var(--accent)">${escHtml(d.time_human||d.iso||'?')}</div><div style="font-size:11px;color:var(--text2)">${escHtml(d.weekday||'')} · ${escHtml(d.date_human||'')} · ${escHtml(d.tz||'')}</div>`;
+  }else if(t==='news'){
+    body=(d.items||[]).slice(0,5).map(it=>`<a href="${escHtml(it.url||'#')}" target="_blank" rel="noopener">${escHtml((it.title||'').slice(0,140))}<span class="src">${escHtml((it.source||'').slice(0,30))}</span></a>`).join('');
+  }else if(t==='stock'){
+    body=(d.quotes||[]).map(q=>{const chg=q.change||0;const pct=q.change_pct||0;const cls=chg>=0?'up':'down';const ar=chg>=0?'▲':'▼';return `<div class="row"><span><strong>${escHtml(q.symbol||'?')}</strong> ${q.price!=null?Number(q.price).toFixed(2):'?'}</span><span class="chg ${cls}">${ar} ${pct.toFixed(2)}%</span></div>`}).join('');
+  }else if(t==='git'){
+    const commits=(d.recent_commits||[]).map(c=>escHtml(c||'')).join('<br>');
+    body=`<div><span class="branch">⎇ ${escHtml(d.branch||'?')}</span> · dirty ${d.dirty_n||0} · ahead ${d.ahead||0} · behind ${d.behind||0}</div>${commits?`<div class="commits">${commits}</div>`:''}`;
+  }else if(t==='file'){
+    body=`<div style="font-size:11px;color:var(--text2);margin-bottom:4px">${escHtml((d.path||'').split('/').pop().split('\\\\').pop())} · ${d.lines_shown||0} lines · ${Math.round((d.size_bytes||0)/1024)}kb</div><pre style="margin:0;font-size:11px;max-height:160px">${escHtml((d.preview||'').slice(0,1500))}</pre>`;
+  }else if(t==='code'){
+    body=`<pre style="margin:0;font-size:11px;max-height:200px">${escHtml(d.code||'')}</pre>`;
+  }else if(t==='error'||t==='info'){
+    body=escHtml(d.message||JSON.stringify(d).slice(0,300));
+  }else{
+    body=`<pre style="margin:0;font-size:11px">${escHtml(JSON.stringify(d,null,2).slice(0,500))}</pre>`;
+  }
+  return `<div class="amni-widget ${t}">${head}<div class="w-body">${body}</div></div>`;
+}
+function addMsg(role, content, tools, widgets){
   const w = $('#welcome'); if(w) w.remove();
   const div = document.createElement('div');
   div.className = `msg ${role}`;
@@ -567,6 +615,9 @@ function addMsg(role, content, tools){
     div.innerHTML = toolHtml + renderMd(content);
   } else {
     div.innerHTML = role === 'user' ? escHtml(content) : renderMd(content);
+  }
+  if(role==='assistant' && widgets && widgets.length){
+    div.innerHTML += widgets.map(renderWidget).join('');
   }
   msgEl.appendChild(div);
   msgEl.scrollTop = msgEl.scrollHeight;
@@ -674,6 +725,7 @@ const res=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'applic
     const decoder = new TextDecoder();
     let buffer = '';
     let allTools = [];
+    let allWidgets = [];
     let finalMessage = '';
     let gotMessage = false;
     while(true){
@@ -712,6 +764,9 @@ const res=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'applic
               finalMessage = data.message;
               gotMessage = true;
               break;
+            case 'widget':
+              allWidgets.push(data);
+              break;
             case 'error':
               removeThinking();
               addMsg('system', 'Error: ' + (data.error || 'Unknown'));
@@ -731,8 +786,8 @@ const res=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'applic
       }
     }
     removeThinking();
-    if(gotMessage || allTools.length){
-      addMsg('assistant', finalMessage || '', allTools.length ? allTools : undefined);
+    if(gotMessage || allTools.length || allWidgets.length){
+      addMsg('assistant', finalMessage || '', allTools.length ? allTools : undefined, allWidgets.length ? allWidgets : undefined);
     }
   } catch(e){
     removeThinking();
@@ -796,7 +851,7 @@ async function loadConfig(){
     $('#cfg-provider').value = c.provider;
     $('#cfg-key').value = c.api_key;
     $('#cfg-url').value = c.base_url;
-$('#cfg-dir').value=c.working_dir;$('#cwd-path').textContent=c.working_dir||'unknown';if(c.model_dir)$('#cfg-model-dir').value=c.model_dir;if(c.auto_approve)$('#cfg-auto').classList.add('on');else $('#cfg-auto').classList.remove('on');if(c.api_key)$('#key-src').textContent='(from ENV)';const noKey=c.provider==='ollama'||c.provider==='local'||c.provider==='amni';$('#model-dir-section').style.display=(c.provider==='ollama'||c.provider==='local')?'block':'none';$('#api-key-label').style.display=noKey?'none':'block';$('#cfg-key').style.display=noKey?'none':'block';await loadModels(c.model);loadDirs(c.working_dir);loadSidebar(c.working_dir);
+$('#cfg-dir').value=c.working_dir;$('#cwd-path').textContent=c.working_dir||'unknown';if(c.model_dir)$('#cfg-model-dir').value=c.model_dir;if(c.auto_approve)$('#cfg-auto').classList.add('on');else $('#cfg-auto').classList.remove('on');if(c.api_key)$('#key-src').textContent='(from ENV)';const noKey=c.provider==='ollama'||c.provider==='local'||c.provider==='amni';$('#model-dir-section').style.display=(c.provider==='ollama'||c.provider==='local')?'block':'none';$('#api-key-label').style.display=noKey?'none':'block';$('#cfg-key').style.display=noKey?'none':'block';if(c.provider==='amni'||c.provider==='local')checkAndStartServer();else await loadModels(c.model);loadDirs(c.working_dir);loadSidebar(c.working_dir);
   } catch(e){console.error('loadConfig:',e);}
 }
 async function loadModels(current){
@@ -828,7 +883,7 @@ async function loadModels(current){
         checkAndStartServer();
         return;
       }
-      const hint = p === 'ollama' ? '(no models &mdash; run: ollama pull <model>)' : p === 'amni' ? '(no models &mdash; is Amni-AI running on :8787?)' : '(no models found)';
+      const hint = p === 'ollama' ? '(no models &mdash; run: ollama pull <model>)' : p === 'amni' ? '(no models &mdash; is Amni-AI running on :7700?)' : '(no models found)';
       sel.innerHTML = `<option>${hint}</option>`;
       return;
     }
@@ -852,7 +907,10 @@ async function loadModels(current){
     }
   } catch(e){ $('#cfg-model').innerHTML = '<option>Error loading</option>'; }
 }
-$('#cfg-model').addEventListener('change', () => saveConfig());
+$('#cfg-model').addEventListener('change', () => {
+  const p = $('#cfg-provider').value;
+  saveConfig().then(() => { if(p === 'amni') checkAndStartServer(); });
+});
 async function loadDirs(base){
   try{
     const res = await fetch('/api/dirs?path=' + encodeURIComponent(base || ''));
@@ -981,13 +1039,14 @@ async function checkAndStartServer(){
     }
     // Server offline — open panel and start it
     openServerPanel();
+    if(data.reachable && data.matching === false) appendServerLog('Selected model differs from the running Amni-AI instance. Restarting with the saved selection...');
     await startServer(); // on ready, startServer calls closeServerPanel(true) → loadModels
   } catch(e){ loadModels(); }
 }
 $('#cfg-provider').addEventListener('change', () => {
   const p = $('#cfg-provider').value;
   const PROVIDER_URLS = {
-    ollama:'http://localhost:11434', local:'http://localhost:8787', amni:'http://127.0.0.1:8787',
+    ollama:'http://localhost:11434', local:'http://localhost:8787', amni:'http://127.0.0.1:7700',
     openai:'https://api.openai.com', anthropic:'https://api.anthropic.com', xai:'https://api.x.ai',
     google:'https://generativelanguage.googleapis.com', deepseek:'https://api.deepseek.com',
     groq:'https://api.groq.com', mistral:'https://api.mistral.ai', cohere:'https://api.cohere.com',

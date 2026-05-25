@@ -1,6 +1,12 @@
-# Amni-Code Architecture Map v2.4.0
+# Amni-Code Architecture Map v2.5.0
 ## Overview
-Single-binary AI coding agent. Rust/Axum backend with embedded HTML UI. No Python/Node/npm runtime deps. Per-session cwd for concurrent windows in diff dirs, no max-iters. **v2.4.0 wires Adam (Amni-Ai v6.9.4 GF(17) 2B) as a first-class autonomous brain** via OpenAI `/v1/chat/completions` on `127.0.0.1:7700`. Stale `:8001` / `:8002` saved URLs auto-remap to `:7700` (in addition to the prior `:8787` migration). Same 10 OpenAI tool-call functions, zero wire-shape changes on this side. v2.2.3 fixes Amni default startup by targeting the Amni-AI web server on port 7700, normalizing stale saved Amni base URLs, and auto-starting the local server immediately on initial config load.
+Single-binary AI coding agent. Rust/Axum backend with embedded HTML UI. No Python/Node/npm runtime deps. Per-session cwd for concurrent windows in diff dirs, no max-iters. **v2.5.0 renders Adam's inline widgets** (weather/system/news/stock/git/file/etc from Amni-Ai v6.10+) as themed cards in the assistant message. **v2.4.0 wired Adam (Amni-Ai v6.9.4 GF(17) 2B) as a first-class autonomous brain** via OpenAI `/v1/chat/completions` on `127.0.0.1:7700`. Stale `:8001` / `:8002` saved URLs auto-remap to `:7700` (in addition to the prior `:8787` migration). Same 10 OpenAI tool-call functions, zero wire-shape changes on this side. v2.2.3 fixes Amni default startup by targeting the Amni-AI web server on port 7700, normalizing stale saved Amni base URLs, and auto-starting the local server immediately on initial config load.
+
+## Widget rendering (v2.5.0)
+- `agent_loop_stream` extracts `raw_msg.amni_widgets[]` from each LLM response and emits one `widget` SSE event per item before the `message` / `tool_*` events.
+- Frontend (`static/index.html`): `case 'widget'` collects into `allWidgets[]`, then `addMsg('assistant', content, tools, widgets)` calls `renderWidget(w)` for each item and appends themed HTML cards to the assistant message bottom.
+- Card CSS uses `--accent`, `--accent-dim`, `--accent-glow`, `--border` from the current theme — cards in pink theme are pink, in haven purple, etc. No theme mismatch.
+- 12 widget types rendered: weather (temp + meta), system (CPU/MEM/DISK/GPU grid), time, news (clickable list with sources), stock (colored ▲/▼ change), code/file (mono pre), git (branch + commits + dirty/ahead/behind), error/info (generic).
 
 ## Adam integration (v2.4.0)
 - Provider `amni` → POSTs to `${amni_base_url}/v1/chat/completions` with `messages[]` + `tools[]` + `tool_choice:"auto"`.

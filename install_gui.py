@@ -286,9 +286,8 @@ class GUInstaller:
                   font=('Segoe UI', 9, 'bold')).grid(row=0, column=0, sticky='w')
         self.model_vars = {}
         models_list = [
-            ("Qwen3.5-7B-Instruct", "Qwen/Qwen3.5-7B-Instruct", True),
-            ("Llama-4-Scout-17B", "meta-llama/Llama-4-Scout-17B-16E-Instruct", True),
-            ("ZAYA1-base", "Zyphra/ZAYA1-base", True),
+            ("Qwen3.5-9B-Neo", "Jackrong/Qwen3.5-9B-Neo", True),
+            ("MLX-Qwen3.5-4B", "Jackrong/MLX-Qwen3.5-4B-Claude-4.6-Opus-Reasoning-Distilled-8bit", True),
         ]
         for i, (name, repo, default) in enumerate(models_list):
             var = tk.BooleanVar(value=default)

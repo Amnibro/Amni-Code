@@ -2,3 +2,10 @@
 *.exe
 *.pdb
 Cargo.lock
+.env
+.env.*
+# Local backups + internal process artifacts (never ship)
+backups/
+docs/checklists/
+docs/guardian_councils/
+__pycache__/

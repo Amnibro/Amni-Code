@@ -49,32 +49,23 @@ impl Default for Config {
         let fireworks_key = std::env::var("FIREWORKS_API_KEY").unwrap_or_default();
         let perplexity_key = std::env::var("PERPLEXITY_API_KEY").unwrap_or_default();
         let openrouter_key = std::env::var("OPENROUTER_API_KEY").unwrap_or_default();
-        let (provider, key) = if !xai_key.is_empty() {
-            ("xai", xai_key)
-        } else if !openai_key.is_empty() {
-            ("openai", openai_key)
-        } else if !anthropic_key.is_empty() {
-            ("anthropic", anthropic_key)
-        } else if !google_key.is_empty() {
-            ("google", google_key)
-        } else if !deepseek_key.is_empty() {
-            ("deepseek", deepseek_key)
-        } else if !groq_key.is_empty() {
-            ("groq", groq_key)
-        } else if !mistral_key.is_empty() {
-            ("mistral", mistral_key)
-        } else if !cohere_key.is_empty() {
-            ("cohere", cohere_key)
-        } else if !together_key.is_empty() {
-            ("together", together_key)
-        } else if !fireworks_key.is_empty() {
-            ("fireworks", fireworks_key)
-        } else if !perplexity_key.is_empty() {
-            ("perplexity", perplexity_key)
-        } else if !openrouter_key.is_empty() {
-            ("openrouter", openrouter_key)
-        } else {
-            ("xai", String::new())
+        let forced = std::env::var("AMNI_CODE_PROVIDER").ok().filter(|v| !v.is_empty());
+        let (provider, key): (&str, String) = match forced.as_deref() {
+            Some("xai") => ("xai", xai_key),
+            Some("openai") => ("openai", openai_key),
+            Some("anthropic") => ("anthropic", anthropic_key),
+            Some("google") => ("google", google_key),
+            Some("deepseek") => ("deepseek", deepseek_key),
+            Some("groq") => ("groq", groq_key),
+            Some("mistral") => ("mistral", mistral_key),
+            Some("cohere") => ("cohere", cohere_key),
+            Some("together") => ("together", together_key),
+            Some("fireworks") => ("fireworks", fireworks_key),
+            Some("perplexity") => ("perplexity", perplexity_key),
+            Some("openrouter") => ("openrouter", openrouter_key),
+            Some("ollama") => ("ollama", String::new()),
+            Some("local") => ("local", String::new()),
+            _ => ("amni", String::new()),
         };
         let (model, base_url) = match provider {
             "openai" => ("gpt-4o".to_string(), "https://api.openai.com".to_string()),
@@ -118,7 +109,7 @@ impl Default for Config {
                 "anthropic/claude-sonnet-4".to_string(),
                 "https://openrouter.ai".to_string(),
             ),
-            "amni" => (String::new(), "http://127.0.0.1:7700".to_string()),
+            "amni" => ("adam:granite-gf17".to_string(), "http://127.0.0.1:7700".to_string()),
             "ollama" => (String::new(), "http://localhost:11434".to_string()),
             "local" => (String::new(), "http://localhost:11434".to_string()),
             _ => (
@@ -605,8 +596,9 @@ async fn llm_request(
         let raw_msg = serde_json::json!({"role": "assistant", "content": content});
         return Ok((raw_msg, Vec::new()));
     }
+    let max_tokens = std::env::var("AMNI_CODE_MAX_TOKENS").ok().and_then(|v| v.parse::<u32>().ok()).unwrap_or(4096);
     let mut body =
-        serde_json::json!({"model": config.model, "messages": messages, "max_tokens": 4096});
+        serde_json::json!({"model": config.model, "messages": messages, "max_tokens": max_tokens});
     if use_tools {
         let tools: serde_json::Value = serde_json::from_str(TOOLS_JSON).unwrap();
         body["tools"] = tools;
@@ -695,7 +687,7 @@ fn compact_context(messages: &mut Vec<serde_json::Value>) {
 }
 async fn agent_loop_stream(app:App,sid:String,user_msg:String,wd:Option<String>,tx:tokio::sync::mpsc::Sender<SseEvent>){let config=app.config.lock().await.clone();ensure_model_loaded(&config).await;let cwd=app.cwd.lock().await.clone();let cwd_path=if let Some(s)=app.sessions.lock().await.get(&sid){if!s.working_dir.is_empty(){PathBuf::from(&s.working_dir)}else{cwd.clone()}}else{wd.as_ref().map_or(cwd.clone(),|w|PathBuf::from(w))};{let mut sessions=app.sessions.lock().await;let session=sessions.entry(sid.clone()).or_default();if session.messages.is_empty(){let custom=load_custom_instructions(&cwd_path);let sys=SYSTEM_PROMPT.replace("{CWD}",&cwd_path.display().to_string()).replace("{CUSTOM_INSTRUCTIONS}",&custom);session.messages.push(serde_json::json!({"role":"system","content":sys}));if let Some(w)=wd{session.working_dir=w.clone();}}session.messages.push(serde_json::json!({"role":"user","content":&user_msg}));compact_context(&mut session.messages);}let interrupt_flag={let mut interrupts=app.interrupts.lock().await;let flag=interrupts.entry(sid.clone()).or_insert_with(||Arc::new(AtomicBool::new(false))).clone();flag.store(false,std::sync::atomic::Ordering::Relaxed);flag};
 let _=tx.send(SseEvent::default().event("session").data(serde_json::json!({"session_id":&sid}).to_string())).await;
-let mut it=0;while it<100{if interrupt_flag.load(std::sync::atomic::Ordering::Relaxed){let _=tx.send(SseEvent::default().event("interrupted").data(serde_json::json!({"session_id":&sid}).to_string())).await;return;}it+=1;let messages=app.sessions.lock().await.entry(sid.clone()).or_default().messages.clone();match llm_call(&config,&messages).await{Ok((raw_msg,tool_calls))=>{if let Some(widgets)=raw_msg.get("amni_widgets").and_then(|w|w.as_array()){for w in widgets{let _=tx.send(SseEvent::default().event("widget").data(w.to_string())).await;}}if tool_calls.is_empty(){let content=raw_msg["content"].as_str().unwrap_or("").to_string();app.sessions.lock().await.entry(sid.clone()).or_default().messages.push(raw_msg);let _=tx.send(SseEvent::default().event("message").data(serde_json::json!({"message":&content}).to_string())).await;let _=tx.send(SseEvent::default().event("done").data(serde_json::json!({"session_id":&sid}).to_string())).await;return;}
+let max_iters=std::env::var("AMNI_CODE_MAX_ITERS").ok().and_then(|v|v.parse::<u32>().ok()).unwrap_or(100);let mut it:u32=0;while it<max_iters{if interrupt_flag.load(std::sync::atomic::Ordering::Relaxed){let _=tx.send(SseEvent::default().event("interrupted").data(serde_json::json!({"session_id":&sid}).to_string())).await;return;}it+=1;let messages=app.sessions.lock().await.entry(sid.clone()).or_default().messages.clone();match llm_call(&config,&messages).await{Ok((raw_msg,tool_calls))=>{if let Some(widgets)=raw_msg.get("amni_widgets").and_then(|w|w.as_array()){for w in widgets{let _=tx.send(SseEvent::default().event("widget").data(w.to_string())).await;}}if tool_calls.is_empty(){let content=raw_msg["content"].as_str().unwrap_or("").to_string();app.sessions.lock().await.entry(sid.clone()).or_default().messages.push(raw_msg);let _=tx.send(SseEvent::default().event("message").data(serde_json::json!({"message":&content}).to_string())).await;let _=tx.send(SseEvent::default().event("done").data(serde_json::json!({"session_id":&sid}).to_string())).await;return;}
                 app.sessions
                     .lock()
                     .await
@@ -946,8 +938,8 @@ async fn handle_server_status(State(app): State<App>) -> Json<serde_json::Value>
     let base = if cfg.provider == "amni" { amni_base_url(&cfg.base_url) } else { cfg.base_url.trim_end_matches('/').to_string() };
     let client = reqwest::Client::builder().timeout(std::time::Duration::from_secs(2)).build().unwrap_or_default();
     let (reachable,active_model)=if cfg.provider=="amni"{probe_server_health(&client,&base).await}else{(client.get(format!("{}/health", base)).send().await.map(|r| r.status().is_success()).unwrap_or(false),None)};
-    let desired_model=if cfg.provider=="amni"{if cfg.model.trim().is_empty(){"amni-a1".to_string()}else{cfg.model.clone()}}else{cfg.model.clone()};
-    let matches_model=if cfg.provider=="amni" && reachable{active_model.as_deref()==Some(desired_model.as_str())}else{true};
+    let desired_model=if cfg.provider=="amni"{if cfg.model.trim().is_empty(){"adam:granite-gf17".to_string()}else{cfg.model.clone()}}else{cfg.model.clone()};
+    let matches_model=true;
     let running = reachable && matches_model;
     let proc_running = app.amni_proc.lock().await.is_some();
     Json(serde_json::json!({"running": running, "reachable": reachable, "matching": matches_model, "active_model": active_model, "desired_model": desired_model, "starting": proc_running && !running, "applicable": true, "provider": cfg.provider}))

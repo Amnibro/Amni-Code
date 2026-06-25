@@ -875,13 +875,7 @@ async fn handle_slash(app: &App, sid: &str, user_msg: &str, wd: &Option<String>,
             let _ = tx.send(SseEvent::default().event("message").data(serde_json::json!({ "message": format!("Switched to **{}** mode.", m) }).to_string())).await;
         }
         SlashCmd::Tool(name, args) => {
-            let cwd_now = {
-                let cwd = app.cwd.lock().await.clone();
-                match app.sessions.lock().await.get(sid) {
-                    Some(s) if !s.working_dir.is_empty() => PathBuf::from(&s.working_dir),
-                    _ => wd.as_ref().map_or(cwd, |w| PathBuf::from(w)),
-                }
-            };
+            let cwd_now = session_cwd(app, sid, wd).await;
             let _ = tx.send(SseEvent::default().event("tool_start").data(serde_json::json!({ "tool": name, "input": &args }).to_string())).await;
             let (output, status) = exec_tool(name, &args, &cwd_now).await;
             let _ = tx.send(SseEvent::default().event("tool_result").data(serde_json::json!({ "tool": name, "input": &args, "output": &output, "status": &status }).to_string())).await;
@@ -892,7 +886,55 @@ async fn handle_slash(app: &App, sid: &str, user_msg: &str, wd: &Option<String>,
     let _ = tx.send(SseEvent::default().event("done").data(serde_json::json!({ "session_id": sid }).to_string())).await;
     SlashOutcome::Handled
 }
-async fn agent_loop_stream(app:App,sid:String,mut user_msg:String,wd:Option<String>,tx:tokio::sync::mpsc::Sender<SseEvent>){match handle_slash(&app,&sid,&user_msg,&wd,&tx).await{SlashOutcome::Handled=>return,SlashOutcome::Rewrite(p)=>user_msg=p,SlashOutcome::NotSlash=>{}}let config=app.config.lock().await.clone();ensure_model_loaded(&config).await;let cwd=app.cwd.lock().await.clone();let cwd_path=if let Some(s)=app.sessions.lock().await.get(&sid){if!s.working_dir.is_empty(){PathBuf::from(&s.working_dir)}else{cwd.clone()}}else{wd.as_ref().map_or(cwd.clone(),|w|PathBuf::from(w))};{let mut sessions=app.sessions.lock().await;let session=sessions.entry(sid.clone()).or_default();if session.messages.is_empty(){let custom=load_custom_instructions(&cwd_path);let sys=SYSTEM_PROMPT.replace("{CWD}",&cwd_path.display().to_string()).replace("{CUSTOM_INSTRUCTIONS}",&custom);session.messages.push(serde_json::json!({"role":"system","content":sys}));if let Some(w)=wd{session.working_dir=w.clone();}}session.messages.push(serde_json::json!({"role":"user","content":&user_msg}));compact_context(&mut session.messages);}let interrupt_flag={let mut interrupts=app.interrupts.lock().await;let flag=interrupts.entry(sid.clone()).or_insert_with(||Arc::new(AtomicBool::new(false))).clone();flag.store(false,std::sync::atomic::Ordering::Relaxed);flag};
+fn extract_mentions(text: &str) -> Vec<String> {
+    let b = text.as_bytes();
+    let mut out = Vec::new();
+    let mut i = 0;
+    while i < b.len() {
+        if b[i] == b'@' && (i == 0 || b[i - 1].is_ascii_whitespace()) {
+            let start = i + 1;
+            let mut j = start;
+            while j < b.len() && (b[j].is_ascii_alphanumeric() || matches!(b[j], b'/' | b'.' | b'_' | b'-')) {
+                j += 1;
+            }
+            if j > start {
+                let p = text[start..j].trim_end_matches(|c: char| c == '.' || c == ',');
+                if !p.is_empty() && (p.contains('/') || p.contains('.')) {
+                    out.push(p.to_string());
+                }
+            }
+            i = j.max(start);
+        } else {
+            i += 1;
+        }
+    }
+    out
+}
+async fn session_cwd(app: &App, sid: &str, wd: &Option<String>) -> PathBuf {
+    let cwd = app.cwd.lock().await.clone();
+    match app.sessions.lock().await.get(sid) {
+        Some(s) if !s.working_dir.is_empty() => PathBuf::from(&s.working_dir),
+        _ => wd.as_ref().map_or(cwd, |w| PathBuf::from(w)),
+    }
+}
+async fn resolve_mentions(user_msg: &str, cwd: &PathBuf) -> Option<String> {
+    let mentions = extract_mentions(user_msg);
+    if mentions.is_empty() {
+        return None;
+    }
+    let mut ctx = String::new();
+    let mut added = 0;
+    for m in mentions.iter().take(8) {
+        let full = if PathBuf::from(m).is_absolute() { PathBuf::from(m) } else { cwd.join(m) };
+        if let Ok(content) = tokio::fs::read_to_string(&full).await {
+            let snippet: String = content.chars().take(8000).collect();
+            ctx.push_str(&format!("Contents of {}:\n```\n{}\n```\n\n", m, snippet));
+            added += 1;
+        }
+    }
+    if added == 0 { None } else { Some(format!("{}{}", ctx, user_msg)) }
+}
+async fn agent_loop_stream(app:App,sid:String,mut user_msg:String,wd:Option<String>,tx:tokio::sync::mpsc::Sender<SseEvent>){match handle_slash(&app,&sid,&user_msg,&wd,&tx).await{SlashOutcome::Handled=>return,SlashOutcome::Rewrite(p)=>user_msg=p,SlashOutcome::NotSlash=>{}}{let __mcwd=session_cwd(&app,&sid,&wd).await;if let Some(__ex)=resolve_mentions(&user_msg,&__mcwd).await{user_msg=__ex;}}let config=app.config.lock().await.clone();ensure_model_loaded(&config).await;let cwd=app.cwd.lock().await.clone();let cwd_path=if let Some(s)=app.sessions.lock().await.get(&sid){if!s.working_dir.is_empty(){PathBuf::from(&s.working_dir)}else{cwd.clone()}}else{wd.as_ref().map_or(cwd.clone(),|w|PathBuf::from(w))};{let mut sessions=app.sessions.lock().await;let session=sessions.entry(sid.clone()).or_default();if session.messages.is_empty(){let custom=load_custom_instructions(&cwd_path);let sys=SYSTEM_PROMPT.replace("{CWD}",&cwd_path.display().to_string()).replace("{CUSTOM_INSTRUCTIONS}",&custom);session.messages.push(serde_json::json!({"role":"system","content":sys}));if let Some(w)=wd{session.working_dir=w.clone();}}session.messages.push(serde_json::json!({"role":"user","content":&user_msg}));compact_context(&mut session.messages);}let interrupt_flag={let mut interrupts=app.interrupts.lock().await;let flag=interrupts.entry(sid.clone()).or_insert_with(||Arc::new(AtomicBool::new(false))).clone();flag.store(false,std::sync::atomic::Ordering::Relaxed);flag};
 let _=tx.send(SseEvent::default().event("session").data(serde_json::json!({"session_id":&sid}).to_string())).await;
 let max_iters=std::env::var("AMNI_CODE_MAX_ITERS").ok().and_then(|v|v.parse::<u32>().ok()).unwrap_or(100);let mut it:u32=0;while it<max_iters{if interrupt_flag.load(std::sync::atomic::Ordering::Relaxed){let _=tx.send(SseEvent::default().event("interrupted").data(serde_json::json!({"session_id":&sid}).to_string())).await;return;}it+=1;let messages=app.sessions.lock().await.entry(sid.clone()).or_default().messages.clone();match llm_call(&config,&messages).await{Ok((raw_msg,tool_calls))=>{if let Some(widgets)=raw_msg.get("amni_widgets").and_then(|w|w.as_array()){for w in widgets{let _=tx.send(SseEvent::default().event("widget").data(w.to_string())).await;}}if tool_calls.is_empty(){let content=raw_msg["content"].as_str().unwrap_or("").to_string();app.sessions.lock().await.entry(sid.clone()).or_default().messages.push(raw_msg);let _=tx.send(SseEvent::default().event("message").data(serde_json::json!({"message":&content}).to_string())).await;let _=tx.send(SseEvent::default().event("done").data(serde_json::json!({"session_id":&sid}).to_string())).await;return;}
                 app.sessions
@@ -2377,5 +2419,15 @@ mod git_tool_tests {
         std::fs::create_dir_all(&empty).unwrap();
         assert_eq!(detect_lint_command(&empty), None);
         let _ = std::fs::remove_dir_all(&base);
+    }
+    #[test]
+    fn mention_extraction() {
+        assert_eq!(extract_mentions("explain @src/main.rs please"), vec!["src/main.rs"]);
+        assert_eq!(extract_mentions("@Cargo.toml and @README.md"), vec!["Cargo.toml", "README.md"]);
+        assert_eq!(extract_mentions("look at @src/main.rs."), vec!["src/main.rs"]);
+        assert_eq!(extract_mentions("@a/b/c.rs"), vec!["a/b/c.rs"]);
+        assert!(extract_mentions("email me at foo@bar.com").is_empty());
+        assert!(extract_mentions("just @someuser here").is_empty());
+        assert!(extract_mentions("no mentions here").is_empty());
     }
 }

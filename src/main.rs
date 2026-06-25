@@ -189,9 +189,10 @@ const TOOLS_JSON: &str = r#"[
   {"type":"function","function":{"name":"git_log","description":"Show recent commits in oneline format.","parameters":{"type":"object","properties":{"count":{"type":"integer","description":"How many commits to show (default 15)"}}}}},
   {"type":"function","function":{"name":"run_tests","description":"Run the project's test suite (auto-detects cargo/go/pytest/npm from the working dir; pass 'command' to override). Returns pass/fail + output. ALWAYS run after changing code and fix failures before finishing.","parameters":{"type":"object","properties":{"command":{"type":"string","description":"Optional explicit test command instead of auto-detect"}}}}},
   {"type":"function","function":{"name":"run_lint","description":"Run the project's linter (auto-detects clippy/go vet/ruff/eslint from the working dir; pass 'command' to override). Surfaces code-quality and correctness diagnostics. Run after edits alongside run_tests.","parameters":{"type":"object","properties":{"command":{"type":"string","description":"Optional explicit lint command instead of auto-detect"}}}}},
-  {"type":"function","function":{"name":"multi_edit","description":"Apply multiple find/replace edits to ONE file atomically (all-or-nothing). Each edit replaces the first occurrence of old_string with new_string, applied in order. If any old_string is not found, NOTHING is written. Prefer this over several edit_file calls to the same file.","parameters":{"type":"object","properties":{"path":{"type":"string"},"edits":{"type":"array","items":{"type":"object","properties":{"old_string":{"type":"string"},"new_string":{"type":"string"}},"required":["old_string","new_string"]}}},"required":["path","edits"]}}}
+  {"type":"function","function":{"name":"multi_edit","description":"Apply multiple find/replace edits to ONE file atomically (all-or-nothing). Each edit replaces the first occurrence of old_string with new_string, applied in order. If any old_string is not found, NOTHING is written. Prefer this over several edit_file calls to the same file.","parameters":{"type":"object","properties":{"path":{"type":"string"},"edits":{"type":"array","items":{"type":"object","properties":{"old_string":{"type":"string"},"new_string":{"type":"string"}},"required":["old_string","new_string"]}}},"required":["path","edits"]}}},
+  {"type":"function","function":{"name":"run_format","description":"Auto-format the code (auto-detects cargo fmt/gofmt/ruff format/prettier from the working dir; pass 'command' to override). Run after edits, before run_lint and run_tests.","parameters":{"type":"object","properties":{"command":{"type":"string","description":"Optional explicit format command instead of auto-detect"}}}}}
 ]"#;
-const SYSTEM_PROMPT:&str="You are Amni-Code,an expert AI coding agent.Your working dir is:{CWD}\n\nCRITICAL:chain actions,NEVER stop after 1 tool,explore w/tools first,read key files before edits,verify after changes,concise,base paths on cwd,fix errors+retry.\n\nTools:read_file,write_file,edit_file,multi_edit,run_command,list_directory,search_files,web_fetch,web_search,memory_read,memory_write,git_status,git_diff,git_add,git_commit,git_log,run_tests,run_lint\n\nVerify:after editing code,call run_tests (and run_lint for code quality) and fix failures before reporting done (write->test->fix->retest until green;never claim success on a red suite).\n\nGit:prefer the first-class git_* tools over raw run_command for version control;after a meaningful set of edits offer to git_add+git_commit with a clear message;use git_status/git_diff to review before committing.\n\nSupport /interrupt (stop gen) & steering (append mid-gen context).\n\n{CUSTOM_INSTRUCTIONS}";
+const SYSTEM_PROMPT:&str="You are Amni-Code,an expert AI coding agent.Your working dir is:{CWD}\n\nCRITICAL:chain actions,NEVER stop after 1 tool,explore w/tools first,read key files before edits,verify after changes,concise,base paths on cwd,fix errors+retry.\n\nTools:read_file,write_file,edit_file,multi_edit,run_command,list_directory,search_files,web_fetch,web_search,memory_read,memory_write,git_status,git_diff,git_add,git_commit,git_log,run_tests,run_lint,run_format\n\nVerify:after editing code,run_format then run_lint then run_tests,and fix failures before reporting done (write->format->lint->test->fix until green;never claim success on a red suite).\n\nGit:prefer the first-class git_* tools over raw run_command for version control;after a meaningful set of edits offer to git_add+git_commit with a clear message;use git_status/git_diff to review before committing.\n\nSupport /interrupt (stop gen) & steering (append mid-gen context).\n\n{CUSTOM_INSTRUCTIONS}";
 #[derive(Deserialize)]struct ChatReq{message:String,session_id:Option<String>,working_dir:Option<String>}
 #[derive(Serialize)]
 struct ChatRes {
@@ -454,6 +455,17 @@ async fn exec_tool(name: &str, args: &serde_json::Value, cwd: &PathBuf) -> (Stri
                 }
             }
         }
+        "run_format" => {
+            let cmd = args.get("command").and_then(|c| c.as_str()).filter(|s| !s.is_empty()).map(|s| s.to_string())
+                .or_else(|| detect_format_command(cwd).map(|s| s.to_string()));
+            match cmd {
+                None => ("No formatter detected (looked for Cargo.toml, go.mod, ruff.toml/pyproject.toml, prettier config, package.json). Pass an explicit 'command'.".into(), "error".into()),
+                Some(c) => {
+                    let (out, status) = run_shell(cwd, &c).await;
+                    (format!("$ {}\n{}", c, out), status)
+                }
+            }
+        }
         _ => (format!("Unknown tool: {}", name), "error".into()),
     }
 }
@@ -520,6 +532,21 @@ fn detect_lint_command(cwd: &PathBuf) -> Option<&'static str> {
         Some("npx --no-install eslint .")
     } else if cwd.join("package.json").exists() {
         Some("npm run lint --if-present")
+    } else {
+        None
+    }
+}
+fn detect_format_command(cwd: &PathBuf) -> Option<&'static str> {
+    if cwd.join("Cargo.toml").exists() {
+        Some("cargo fmt")
+    } else if cwd.join("go.mod").exists() {
+        Some("gofmt -w .")
+    } else if cwd.join("ruff.toml").exists() || cwd.join("pyproject.toml").exists() {
+        Some("ruff format .")
+    } else if cwd.join(".prettierrc").exists() || cwd.join(".prettierrc.json").exists() || cwd.join(".prettierrc.js").exists() || cwd.join("prettier.config.js").exists() {
+        Some("npx --no-install prettier --write .")
+    } else if cwd.join("package.json").exists() {
+        Some("npm run format --if-present")
     } else {
         None
     }
@@ -2564,5 +2591,25 @@ mod git_tool_tests {
         assert_eq!(apply_multi_edit(content, &[("".to_string(), "x".to_string())]), Err(0), "empty old_string rejected");
         let seq = vec![("a = 1".to_string(), "a = 1; let d = 4".to_string()), ("d = 4".to_string(), "d = 40".to_string())];
         assert_eq!(apply_multi_edit(content, &seq), Ok("let a = 1; let d = 40;\nlet b = 2;\nlet c = 3;".to_string()), "edits apply sequentially");
+    }
+    #[test]
+    fn format_command_detection() {
+        let base = std::env::temp_dir().join(format!("amni_fmt_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let mk = |sub: &str, marker: &str| -> PathBuf {
+            let d = base.join(sub);
+            std::fs::create_dir_all(&d).unwrap();
+            std::fs::write(d.join(marker), "x").unwrap();
+            d
+        };
+        assert_eq!(detect_format_command(&mk("rust", "Cargo.toml")), Some("cargo fmt"));
+        assert_eq!(detect_format_command(&mk("go", "go.mod")), Some("gofmt -w ."));
+        assert_eq!(detect_format_command(&mk("py", "pyproject.toml")), Some("ruff format ."));
+        assert_eq!(detect_format_command(&mk("pr", ".prettierrc")), Some("npx --no-install prettier --write ."));
+        assert_eq!(detect_format_command(&mk("npm", "package.json")), Some("npm run format --if-present"));
+        let empty = base.join("empty");
+        std::fs::create_dir_all(&empty).unwrap();
+        assert_eq!(detect_format_command(&empty), None);
+        let _ = std::fs::remove_dir_all(&base);
     }
 }

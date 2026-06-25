@@ -186,9 +186,10 @@ const TOOLS_JSON: &str = r#"[
   {"type":"function","function":{"name":"git_diff","description":"Show the git diff of unstaged changes, optionally for a single path. Review changes before committing.","parameters":{"type":"object","properties":{"path":{"type":"string","description":"Optional file or dir to diff"}}}}},
   {"type":"function","function":{"name":"git_add","description":"Stage changes for the next commit. 'path' defaults to '.' (everything).","parameters":{"type":"object","properties":{"path":{"type":"string","description":"File or dir to stage (default '.')"}}}}},
   {"type":"function","function":{"name":"git_commit","description":"Commit staged changes with a message. Run git_add first to stage. Requires a non-empty message.","parameters":{"type":"object","properties":{"message":{"type":"string","description":"Commit message"}},"required":["message"]}}},
-  {"type":"function","function":{"name":"git_log","description":"Show recent commits in oneline format.","parameters":{"type":"object","properties":{"count":{"type":"integer","description":"How many commits to show (default 15)"}}}}}
+  {"type":"function","function":{"name":"git_log","description":"Show recent commits in oneline format.","parameters":{"type":"object","properties":{"count":{"type":"integer","description":"How many commits to show (default 15)"}}}}},
+  {"type":"function","function":{"name":"run_tests","description":"Run the project's test suite (auto-detects cargo/go/pytest/npm from the working dir; pass 'command' to override). Returns pass/fail + output. ALWAYS run after changing code and fix failures before finishing.","parameters":{"type":"object","properties":{"command":{"type":"string","description":"Optional explicit test command instead of auto-detect"}}}}}
 ]"#;
-const SYSTEM_PROMPT:&str="You are Amni-Code,an expert AI coding agent.Your working dir is:{CWD}\n\nCRITICAL:chain actions,NEVER stop after 1 tool,explore w/tools first,read key files before edits,verify after changes,concise,base paths on cwd,fix errors+retry.\n\nTools:read_file,write_file,edit_file,run_command,list_directory,search_files,web_fetch,web_search,memory_read,memory_write,git_status,git_diff,git_add,git_commit,git_log\n\nGit:prefer the first-class git_* tools over raw run_command for version control;after a meaningful set of edits offer to git_add+git_commit with a clear message;use git_status/git_diff to review before committing.\n\nSupport /interrupt (stop gen) & steering (append mid-gen context).\n\n{CUSTOM_INSTRUCTIONS}";
+const SYSTEM_PROMPT:&str="You are Amni-Code,an expert AI coding agent.Your working dir is:{CWD}\n\nCRITICAL:chain actions,NEVER stop after 1 tool,explore w/tools first,read key files before edits,verify after changes,concise,base paths on cwd,fix errors+retry.\n\nTools:read_file,write_file,edit_file,run_command,list_directory,search_files,web_fetch,web_search,memory_read,memory_write,git_status,git_diff,git_add,git_commit,git_log,run_tests\n\nVerify:after editing code,call run_tests and fix any failures before reporting done (write->test->fix->retest until green;never claim success on a red suite).\n\nGit:prefer the first-class git_* tools over raw run_command for version control;after a meaningful set of edits offer to git_add+git_commit with a clear message;use git_status/git_diff to review before committing.\n\nSupport /interrupt (stop gen) & steering (append mid-gen context).\n\n{CUSTOM_INSTRUCTIONS}";
 #[derive(Deserialize)]struct ChatReq{message:String,session_id:Option<String>,working_dir:Option<String>}
 #[derive(Serialize)]
 struct ChatRes {
@@ -409,6 +410,17 @@ async fn exec_tool(name: &str, args: &serde_json::Value, cwd: &PathBuf) -> (Stri
             let n = args.get("count").and_then(|c| c.as_u64()).unwrap_or(15).clamp(1, 100).to_string();
             git_run(cwd, &["log", "--oneline", "-n", n.as_str()]).await
         }
+        "run_tests" => {
+            let cmd = args.get("command").and_then(|c| c.as_str()).filter(|s| !s.is_empty()).map(|s| s.to_string())
+                .or_else(|| detect_test_command(cwd).map(|s| s.to_string()));
+            match cmd {
+                None => ("No test command detected (looked for Cargo.toml, go.mod, pyproject.toml/pytest.ini/setup.py, package.json). Pass an explicit 'command'.".into(), "error".into()),
+                Some(c) => {
+                    let (out, status) = run_shell(cwd, &c).await;
+                    (format!("$ {}\n{}", c, out), status)
+                }
+            }
+        }
         _ => (format!("Unknown tool: {}", name), "error".into()),
     }
 }
@@ -440,6 +452,47 @@ async fn git_run(cwd: &PathBuf, gitargs: &[&str]) -> (String, String) {
 }
 fn is_mutating_tool(name: &str) -> bool {
     matches!(name, "write_file" | "edit_file" | "run_command" | "git_add" | "git_commit" | "memory_write")
+}
+fn detect_test_command(cwd: &PathBuf) -> Option<&'static str> {
+    if cwd.join("Cargo.toml").exists() {
+        Some("cargo test")
+    } else if cwd.join("go.mod").exists() {
+        Some("go test ./...")
+    } else if cwd.join("pyproject.toml").exists() || cwd.join("pytest.ini").exists() || cwd.join("setup.py").exists() || cwd.join("tox.ini").exists() {
+        Some("python -m pytest -q")
+    } else if cwd.join("package.json").exists() {
+        Some("npm test")
+    } else {
+        None
+    }
+}
+async fn run_shell(cwd: &PathBuf, cmd: &str) -> (String, String) {
+    let shell = if cfg!(windows) {
+        ("cmd", vec!["/C".to_string(), cmd.to_string()])
+    } else {
+        ("sh", vec!["-c".to_string(), cmd.to_string()])
+    };
+    match tokio::process::Command::new(shell.0)
+        .args(&shell.1)
+        .current_dir(cwd)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
+        .await
+    {
+        Ok(o) => {
+            let mut out = format!(
+                "{}{}",
+                String::from_utf8_lossy(&o.stdout),
+                if o.stderr.is_empty() { String::new() } else { format!("\n{}", String::from_utf8_lossy(&o.stderr)) }
+            );
+            if out.len() > 10000 {
+                out = format!("{}...(truncated)", &out[..10000]);
+            }
+            (out, if o.status.success() { "success".into() } else { "error".into() })
+        }
+        Err(e) => (format!("Failed: {}", e), "error".into()),
+    }
 }
 fn strip_html(html: &str) -> String {
     let mut out = String::with_capacity(html.len() / 2);
@@ -2174,5 +2227,24 @@ mod git_tool_tests {
         assert!(!gated("plan", "read_file"), "plan mode must allow read_file");
         assert!(!gated("edit", "write_file"), "edit mode executes write_file");
         assert!(!gated("autonomous", "run_command"), "autonomous executes run_command");
+    }
+    #[test]
+    fn test_command_detection() {
+        let base = std::env::temp_dir().join(format!("amni_tc_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let mk = |sub: &str, marker: &str| -> PathBuf {
+            let d = base.join(sub);
+            std::fs::create_dir_all(&d).unwrap();
+            std::fs::write(d.join(marker), "x").unwrap();
+            d
+        };
+        assert_eq!(detect_test_command(&mk("rust", "Cargo.toml")), Some("cargo test"));
+        assert_eq!(detect_test_command(&mk("go", "go.mod")), Some("go test ./..."));
+        assert_eq!(detect_test_command(&mk("py", "pyproject.toml")), Some("python -m pytest -q"));
+        assert_eq!(detect_test_command(&mk("js", "package.json")), Some("npm test"));
+        let empty = base.join("empty");
+        std::fs::create_dir_all(&empty).unwrap();
+        assert_eq!(detect_test_command(&empty), None);
+        let _ = std::fs::remove_dir_all(&base);
     }
 }

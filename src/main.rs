@@ -190,9 +190,10 @@ const TOOLS_JSON: &str = r#"[
   {"type":"function","function":{"name":"run_tests","description":"Run the project's test suite (auto-detects cargo/go/pytest/npm from the working dir; pass 'command' to override). Returns pass/fail + output. ALWAYS run after changing code and fix failures before finishing.","parameters":{"type":"object","properties":{"command":{"type":"string","description":"Optional explicit test command instead of auto-detect"}}}}},
   {"type":"function","function":{"name":"run_lint","description":"Run the project's linter (auto-detects clippy/go vet/ruff/eslint from the working dir; pass 'command' to override). Surfaces code-quality and correctness diagnostics. Run after edits alongside run_tests.","parameters":{"type":"object","properties":{"command":{"type":"string","description":"Optional explicit lint command instead of auto-detect"}}}}},
   {"type":"function","function":{"name":"multi_edit","description":"Apply multiple find/replace edits to ONE file atomically (all-or-nothing). Each edit replaces the first occurrence of old_string with new_string, applied in order. If any old_string is not found, NOTHING is written. Prefer this over several edit_file calls to the same file.","parameters":{"type":"object","properties":{"path":{"type":"string"},"edits":{"type":"array","items":{"type":"object","properties":{"old_string":{"type":"string"},"new_string":{"type":"string"}},"required":["old_string","new_string"]}}},"required":["path","edits"]}}},
-  {"type":"function","function":{"name":"run_format","description":"Auto-format the code (auto-detects cargo fmt/gofmt/ruff format/prettier from the working dir; pass 'command' to override). Run after edits, before run_lint and run_tests.","parameters":{"type":"object","properties":{"command":{"type":"string","description":"Optional explicit format command instead of auto-detect"}}}}}
+  {"type":"function","function":{"name":"run_format","description":"Auto-format the code (auto-detects cargo fmt/gofmt/ruff format/prettier from the working dir; pass 'command' to override). Run after edits, before run_lint and run_tests.","parameters":{"type":"object","properties":{"command":{"type":"string","description":"Optional explicit format command instead of auto-detect"}}}}},
+  {"type":"function","function":{"name":"find_definition","description":"Find where a symbol is DEFINED across the codebase (fn/func/def/function/class/struct/enum/trait/interface/type/const/impl/mod NAME). Returns file:line matches. Faster + more precise than search_files for go-to-definition.","parameters":{"type":"object","properties":{"name":{"type":"string","description":"Symbol name to find the definition of"},"path":{"type":"string","description":"Optional dir to search (default '.')"}},"required":["name"]}}}
 ]"#;
-const SYSTEM_PROMPT:&str="You are Amni-Code,an expert AI coding agent.Your working dir is:{CWD}\n\nCRITICAL:chain actions,NEVER stop after 1 tool,explore w/tools first,read key files before edits,verify after changes,concise,base paths on cwd,fix errors+retry.\n\nTools:read_file,write_file,edit_file,multi_edit,run_command,list_directory,search_files,web_fetch,web_search,memory_read,memory_write,git_status,git_diff,git_add,git_commit,git_log,run_tests,run_lint,run_format\n\nVerify:after editing code,run_format then run_lint then run_tests,and fix failures before reporting done (write->format->lint->test->fix until green;never claim success on a red suite).\n\nGit:prefer the first-class git_* tools over raw run_command for version control;after a meaningful set of edits offer to git_add+git_commit with a clear message;use git_status/git_diff to review before committing.\n\nSupport /interrupt (stop gen) & steering (append mid-gen context).\n\n{CUSTOM_INSTRUCTIONS}";
+const SYSTEM_PROMPT:&str="You are Amni-Code,an expert AI coding agent.Your working dir is:{CWD}\n\nCRITICAL:chain actions,NEVER stop after 1 tool,explore w/tools first,read key files before edits,verify after changes,concise,base paths on cwd,fix errors+retry.\n\nTools:read_file,write_file,edit_file,multi_edit,run_command,list_directory,search_files,web_fetch,web_search,memory_read,memory_write,git_status,git_diff,git_add,git_commit,git_log,run_tests,run_lint,run_format,find_definition\n\nVerify:after editing code,run_format then run_lint then run_tests,and fix failures before reporting done (write->format->lint->test->fix until green;never claim success on a red suite).\n\nGit:prefer the first-class git_* tools over raw run_command for version control;after a meaningful set of edits offer to git_add+git_commit with a clear message;use git_status/git_diff to review before committing.\n\nSupport /interrupt (stop gen) & steering (append mid-gen context).\n\n{CUSTOM_INSTRUCTIONS}";
 #[derive(Deserialize)]struct ChatReq{message:String,session_id:Option<String>,working_dir:Option<String>}
 #[derive(Serialize)]
 struct ChatRes {
@@ -466,6 +467,20 @@ async fn exec_tool(name: &str, args: &serde_json::Value, cwd: &PathBuf) -> (Stri
                 }
             }
         }
+        "find_definition" => {
+            let sym = args["name"].as_str().unwrap_or("");
+            if sym.is_empty() {
+                ("Error: find_definition requires a 'name'".into(), "error".into())
+            } else {
+                let root = resolve(args.get("path").and_then(|p| p.as_str()).unwrap_or("."));
+                let matches = find_definitions(&root, sym).await;
+                if matches.is_empty() {
+                    (format!("No definition of '{}' found", sym), "success".into())
+                } else {
+                    (matches.join("\n"), "success".into())
+                }
+            }
+        }
         _ => (format!("Unknown tool: {}", name), "error".into()),
     }
 }
@@ -550,6 +565,59 @@ fn detect_format_command(cwd: &PathBuf) -> Option<&'static str> {
     } else {
         None
     }
+}
+fn is_definition(line: &str, name: &str) -> bool {
+    const KW: &[&str] = &["fn", "func", "def", "function", "class", "struct", "enum", "trait", "interface", "type", "const", "static", "impl", "mod"];
+    let mut prev_kw = false;
+    for t in line.split(|c: char| c.is_whitespace() || c == '(' || c == '<' || c == ':' || c == '{').filter(|s| !s.is_empty()) {
+        let is_kw = KW.contains(&t);
+        if prev_kw && !is_kw {
+            return t.trim_end_matches(|c: char| !(c.is_ascii_alphanumeric() || c == '_')) == name;
+        }
+        if is_kw {
+            prev_kw = true;
+        }
+    }
+    false
+}
+async fn find_definitions(root: &PathBuf, name: &str) -> Vec<String> {
+    const SKIP: &[&str] = &["target", "node_modules", ".git", ".venv", "__pycache__", "dist", "build", ".next"];
+    let mut out = Vec::new();
+    let mut stack = vec![root.clone()];
+    while let Some(dir) = stack.pop() {
+        if out.len() >= 100 {
+            break;
+        }
+        let mut rd = match tokio::fs::read_dir(&dir).await {
+            Ok(r) => r,
+            Err(_) => continue,
+        };
+        while let Ok(Some(entry)) = rd.next_entry().await {
+            let path = entry.path();
+            let fname = entry.file_name().to_string_lossy().to_string();
+            let is_dir = entry.file_type().await.map(|t| t.is_dir()).unwrap_or(false);
+            if is_dir {
+                if !SKIP.contains(&fname.as_str()) && !fname.starts_with('.') {
+                    stack.push(path);
+                }
+            } else {
+                if entry.metadata().await.map(|m| m.len() > 2_000_000).unwrap_or(true) {
+                    continue;
+                }
+                if let Ok(content) = tokio::fs::read_to_string(&path).await {
+                    for (i, line) in content.lines().enumerate() {
+                        if line.contains(name) && is_definition(line, name) {
+                            out.push(format!("{}:{}: {}", path.display(), i + 1, line.trim()));
+                            if out.len() >= 100 {
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    out
 }
 async fn run_shell(cwd: &PathBuf, cmd: &str) -> (String, String) {
     let shell = if cfg!(windows) {
@@ -2611,5 +2679,20 @@ mod git_tool_tests {
         std::fs::create_dir_all(&empty).unwrap();
         assert_eq!(detect_format_command(&empty), None);
         let _ = std::fs::remove_dir_all(&base);
+    }
+    #[test]
+    fn definition_matcher() {
+        assert!(is_definition("pub fn foo() {", "foo"));
+        assert!(is_definition("struct Bar {", "Bar"));
+        assert!(is_definition("    def my_func(self):", "my_func"));
+        assert!(is_definition("const MAX = 100;", "MAX"));
+        assert!(is_definition("async function calculate(a) {", "calculate"));
+        assert!(is_definition("impl Widget {", "Widget"));
+        assert!(is_definition("pub const fn baz<T>(", "baz"));
+        assert!(!is_definition("let foo = 1;", "foo"), "let binding is not a definition");
+        assert!(!is_definition("use foo::bar;", "bar"), "import is not a definition");
+        assert!(!is_definition("call_foo();", "foo"), "call is not a definition");
+        assert!(!is_definition("foo.bar()", "bar"), "method call is not a definition");
+        assert!(!is_definition("fn other() {", "foo"), "different symbol name");
     }
 }

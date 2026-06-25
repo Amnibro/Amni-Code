@@ -797,7 +797,75 @@ fn compact_context(messages: &mut Vec<serde_json::Value>) {
     }));
     messages.extend(recent);
 }
-async fn agent_loop_stream(app:App,sid:String,user_msg:String,wd:Option<String>,tx:tokio::sync::mpsc::Sender<SseEvent>){let config=app.config.lock().await.clone();ensure_model_loaded(&config).await;let cwd=app.cwd.lock().await.clone();let cwd_path=if let Some(s)=app.sessions.lock().await.get(&sid){if!s.working_dir.is_empty(){PathBuf::from(&s.working_dir)}else{cwd.clone()}}else{wd.as_ref().map_or(cwd.clone(),|w|PathBuf::from(w))};{let mut sessions=app.sessions.lock().await;let session=sessions.entry(sid.clone()).or_default();if session.messages.is_empty(){let custom=load_custom_instructions(&cwd_path);let sys=SYSTEM_PROMPT.replace("{CWD}",&cwd_path.display().to_string()).replace("{CUSTOM_INSTRUCTIONS}",&custom);session.messages.push(serde_json::json!({"role":"system","content":sys}));if let Some(w)=wd{session.working_dir=w.clone();}}session.messages.push(serde_json::json!({"role":"user","content":&user_msg}));compact_context(&mut session.messages);}let interrupt_flag={let mut interrupts=app.interrupts.lock().await;let flag=interrupts.entry(sid.clone()).or_insert_with(||Arc::new(AtomicBool::new(false))).clone();flag.store(false,std::sync::atomic::Ordering::Relaxed);flag};
+#[derive(Debug, PartialEq)]
+enum SlashCmd {
+    Tool(&'static str, serde_json::Value),
+    SetMode(&'static str),
+    Prompt(String),
+    Help,
+}
+fn parse_slash(input: &str) -> Option<SlashCmd> {
+    let rest = input.trim().strip_prefix('/')?;
+    let (cmd, arg) = match rest.split_once(char::is_whitespace) {
+        Some((c, a)) => (c, a.trim()),
+        None => (rest, ""),
+    };
+    match cmd {
+        "test" => Some(SlashCmd::Tool("run_tests", if arg.is_empty() { serde_json::json!({}) } else { serde_json::json!({ "command": arg }) })),
+        "status" => Some(SlashCmd::Tool("git_status", serde_json::json!({}))),
+        "diff" => Some(SlashCmd::Tool("git_diff", if arg.is_empty() { serde_json::json!({}) } else { serde_json::json!({ "path": arg }) })),
+        "log" => Some(SlashCmd::Tool("git_log", serde_json::json!({}))),
+        "commit" => Some(SlashCmd::Prompt(format!(
+            "Review changes with git_status and git_diff, then git_add and git_commit with a clear, concise message{}.",
+            if arg.is_empty() { String::new() } else { format!(" (the user suggests: \"{}\")", arg) }
+        ))),
+        "review" => Some(SlashCmd::Prompt(format!(
+            "Review {} for bugs, edge cases, security, and clarity. Inspect with read_file/git_diff, then list concrete findings as 'file:line: issue -> fix'; if clean, say so.",
+            if arg.is_empty() { "the recent changes (git_diff)".to_string() } else { format!("`{}`", arg) }
+        ))),
+        "plan" => Some(SlashCmd::SetMode("plan")),
+        "edit" => Some(SlashCmd::SetMode("edit")),
+        "auto" | "autonomous" => Some(SlashCmd::SetMode("autonomous")),
+        "help" | "?" => Some(SlashCmd::Help),
+        _ => None,
+    }
+}
+const SLASH_HELP: &str = "**Slash commands:**\n- `/test [cmd]` - run the test suite (auto-detected)\n- `/status` - git status\n- `/diff [path]` - git diff\n- `/log` - recent commits\n- `/commit [msg]` - review + stage + commit\n- `/review [path]` - code review of changes or a path\n- `/plan` `/edit` `/auto` - switch agent mode\n- `/help` - this list";
+enum SlashOutcome { NotSlash, Handled, Rewrite(String) }
+async fn handle_slash(app: &App, sid: &str, user_msg: &str, wd: &Option<String>, tx: &tokio::sync::mpsc::Sender<SseEvent>) -> SlashOutcome {
+    let scmd = match parse_slash(user_msg) { Some(c) => c, None => return SlashOutcome::NotSlash };
+    let inline = match scmd {
+        SlashCmd::Prompt(p) => return SlashOutcome::Rewrite(p),
+        other => other,
+    };
+    let _ = tx.send(SseEvent::default().event("session").data(serde_json::json!({ "session_id": sid }).to_string())).await;
+    match inline {
+        SlashCmd::Help => {
+            let _ = tx.send(SseEvent::default().event("message").data(serde_json::json!({ "message": SLASH_HELP }).to_string())).await;
+        }
+        SlashCmd::SetMode(m) => {
+            { let mut c = app.config.lock().await; c.mode = m.to_string(); persist_config(&c.clone()); }
+            let _ = tx.send(SseEvent::default().event("message").data(serde_json::json!({ "message": format!("Switched to **{}** mode.", m) }).to_string())).await;
+        }
+        SlashCmd::Tool(name, args) => {
+            let cwd_now = {
+                let cwd = app.cwd.lock().await.clone();
+                match app.sessions.lock().await.get(sid) {
+                    Some(s) if !s.working_dir.is_empty() => PathBuf::from(&s.working_dir),
+                    _ => wd.as_ref().map_or(cwd, |w| PathBuf::from(w)),
+                }
+            };
+            let _ = tx.send(SseEvent::default().event("tool_start").data(serde_json::json!({ "tool": name, "input": &args }).to_string())).await;
+            let (output, status) = exec_tool(name, &args, &cwd_now).await;
+            let _ = tx.send(SseEvent::default().event("tool_result").data(serde_json::json!({ "tool": name, "input": &args, "output": &output, "status": &status }).to_string())).await;
+            let _ = tx.send(SseEvent::default().event("message").data(serde_json::json!({ "message": format!("`/{}` result:\n```\n{}\n```", name, output) }).to_string())).await;
+        }
+        SlashCmd::Prompt(_) => {}
+    }
+    let _ = tx.send(SseEvent::default().event("done").data(serde_json::json!({ "session_id": sid }).to_string())).await;
+    SlashOutcome::Handled
+}
+async fn agent_loop_stream(app:App,sid:String,mut user_msg:String,wd:Option<String>,tx:tokio::sync::mpsc::Sender<SseEvent>){match handle_slash(&app,&sid,&user_msg,&wd,&tx).await{SlashOutcome::Handled=>return,SlashOutcome::Rewrite(p)=>user_msg=p,SlashOutcome::NotSlash=>{}}let config=app.config.lock().await.clone();ensure_model_loaded(&config).await;let cwd=app.cwd.lock().await.clone();let cwd_path=if let Some(s)=app.sessions.lock().await.get(&sid){if!s.working_dir.is_empty(){PathBuf::from(&s.working_dir)}else{cwd.clone()}}else{wd.as_ref().map_or(cwd.clone(),|w|PathBuf::from(w))};{let mut sessions=app.sessions.lock().await;let session=sessions.entry(sid.clone()).or_default();if session.messages.is_empty(){let custom=load_custom_instructions(&cwd_path);let sys=SYSTEM_PROMPT.replace("{CWD}",&cwd_path.display().to_string()).replace("{CUSTOM_INSTRUCTIONS}",&custom);session.messages.push(serde_json::json!({"role":"system","content":sys}));if let Some(w)=wd{session.working_dir=w.clone();}}session.messages.push(serde_json::json!({"role":"user","content":&user_msg}));compact_context(&mut session.messages);}let interrupt_flag={let mut interrupts=app.interrupts.lock().await;let flag=interrupts.entry(sid.clone()).or_insert_with(||Arc::new(AtomicBool::new(false))).clone();flag.store(false,std::sync::atomic::Ordering::Relaxed);flag};
 let _=tx.send(SseEvent::default().event("session").data(serde_json::json!({"session_id":&sid}).to_string())).await;
 let max_iters=std::env::var("AMNI_CODE_MAX_ITERS").ok().and_then(|v|v.parse::<u32>().ok()).unwrap_or(100);let mut it:u32=0;while it<max_iters{if interrupt_flag.load(std::sync::atomic::Ordering::Relaxed){let _=tx.send(SseEvent::default().event("interrupted").data(serde_json::json!({"session_id":&sid}).to_string())).await;return;}it+=1;let messages=app.sessions.lock().await.entry(sid.clone()).or_default().messages.clone();match llm_call(&config,&messages).await{Ok((raw_msg,tool_calls))=>{if let Some(widgets)=raw_msg.get("amni_widgets").and_then(|w|w.as_array()){for w in widgets{let _=tx.send(SseEvent::default().event("widget").data(w.to_string())).await;}}if tool_calls.is_empty(){let content=raw_msg["content"].as_str().unwrap_or("").to_string();app.sessions.lock().await.entry(sid.clone()).or_default().messages.push(raw_msg);let _=tx.send(SseEvent::default().event("message").data(serde_json::json!({"message":&content}).to_string())).await;let _=tx.send(SseEvent::default().event("done").data(serde_json::json!({"session_id":&sid}).to_string())).await;return;}
                 app.sessions
@@ -2246,5 +2314,21 @@ mod git_tool_tests {
         std::fs::create_dir_all(&empty).unwrap();
         assert_eq!(detect_test_command(&empty), None);
         let _ = std::fs::remove_dir_all(&base);
+    }
+    #[test]
+    fn slash_command_parsing() {
+        assert_eq!(parse_slash("/test"), Some(SlashCmd::Tool("run_tests", serde_json::json!({}))));
+        assert_eq!(parse_slash("/test cargo test --lib"), Some(SlashCmd::Tool("run_tests", serde_json::json!({"command":"cargo test --lib"}))));
+        assert_eq!(parse_slash("/status"), Some(SlashCmd::Tool("git_status", serde_json::json!({}))));
+        assert_eq!(parse_slash("/diff src/main.rs"), Some(SlashCmd::Tool("git_diff", serde_json::json!({"path":"src/main.rs"}))));
+        assert_eq!(parse_slash("/log"), Some(SlashCmd::Tool("git_log", serde_json::json!({}))));
+        assert_eq!(parse_slash("/plan"), Some(SlashCmd::SetMode("plan")));
+        assert_eq!(parse_slash("/auto"), Some(SlashCmd::SetMode("autonomous")));
+        assert_eq!(parse_slash("/help"), Some(SlashCmd::Help));
+        assert!(matches!(parse_slash("/commit fix the bug"), Some(SlashCmd::Prompt(_))));
+        assert!(matches!(parse_slash("/review"), Some(SlashCmd::Prompt(_))));
+        assert_eq!(parse_slash("hello world"), None);
+        assert_eq!(parse_slash("/unknowncmd"), None);
+        assert_eq!(parse_slash("not /a slash"), None);
     }
 }

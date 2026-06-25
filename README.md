@@ -8,7 +8,7 @@
     <a href="https://ko-fi.com/anmire"><img src="https://img.shields.io/badge/Ko--fi-Support%20the%20project-FF5E5B?logo=ko-fi&logoColor=white" alt="Ko-fi"></a>
     <a href="https://github.com/anmire/Amni-Code/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License"></a>
     <img src="https://img.shields.io/badge/built%20with-Rust-orange?logo=rust" alt="Rust">
-    <img src="https://img.shields.io/badge/version-2.2.0-e91e63" alt="Version">
+    <img src="https://img.shields.io/badge/version-2.8.0-e91e63" alt="Version">
   </p>
 </p>
 
@@ -27,7 +27,14 @@ Amni-Code is a **self-hosted AI coding agent** with a full embedded IDE. Give an
 
 | Feature | Description |
 |---------|-------------|
-| 🔁 **Agentic Tool Loop** | 12 tools — read/write/edit files, run commands, search files, web fetch/search, persistent memory |
+| 🔁 **Agentic Tool Loop** | 19 tools — read/write/edit/**multi-edit** files, run commands, search, web fetch/search, memory, **git** (status/diff/add/commit/log), **format/lint/test** |
+| 🧭 **Operating Modes** | **Plan** (propose, never mutate) · **Edit** · **Autonomous** — Claude-Code-style control |
+| ✅ **Quality Gate** | `run_format` → `run_lint` → `run_tests` (auto-detected cargo/go/py/npm) — write→test→fix loop |
+| 🌿 **Git Built-in** | First-class `git_status/diff/add/commit/log` tools — not just shell |
+| ⌨️ **Slash Commands** | `/test` `/commit` `/diff` `/review` `/plan` `/edit` `/auto` `/help` |
+| 📎 **@-File Mentions** | Type `@path/to/file` to drop its contents straight into context |
+| ⏪ **Session Checkpoints** | Snapshot + restore a whole session — conversation *and* files |
+| ✂️ **Atomic Multi-Edit** | Apply many find/replace edits to one file all-or-nothing |
 | 🧠 **Any LLM Provider** | xAI Grok, OpenAI, Anthropic, Ollama, or any OpenAI-compatible endpoint |
 | 📦 **Single Binary** | One Rust binary. No runtime deps. Just `cargo build` and go |
 | 🎨 **Full IDE** | Monaco editor with multi-file tabs, breadcrumbs, syntax highlighting for 30+ languages |
@@ -203,7 +210,7 @@ Amni-Code/
 ## Contributing
 
 1. Fork → branch → PR. All contributions welcome.
-2. Ideas: Linux/macOS installers, multimodal support, Git integration, diagnostics panel, more providers.
+2. Ideas: edit-mode approval UI, MCP client, LSP/inline diagnostics, semantic codebase index, Linux/macOS installers, multimodal.
 
 ## Support
 

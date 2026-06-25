@@ -1,4 +1,6 @@
-# Amni-Code Architecture Map v2.5.0
+# Amni-Code Architecture Map v2.8.0
+## v2.8.0 best-coding-platform sprint (9 tested features, cargo test 0->9)
+First-class git tools (git_status/diff/add/commit/log) · plan/edit/autonomous operating modes (Config.mode + is_mutating_tool plan gate in agent_loop_stream) · verify/test loop (run_tests + detect_test_command) · slash commands (parse_slash/handle_slash: /test /commit /diff /log /review /plan /edit /auto /help) · run_lint (detect_lint_command) · @-file mentions (extract_mentions/resolve_mentions/session_cwd) · session checkpoints (Checkpoint + snapshot_files/restore_files + /api/checkpoint|checkpoints|restore) · multi_edit (apply_multi_edit, atomic) · run_format (detect_format_command). Tests in `mod git_tool_tests`. The README feature table + changelog v2.8.0 cover the user-facing surface.
 ## Overview
 Single-binary AI coding agent. Rust/Axum backend with embedded HTML UI. No Python/Node/npm runtime deps. Per-session cwd for concurrent windows in diff dirs, no max-iters. **v2.5.0 renders Adam's inline widgets** (weather/system/news/stock/git/file/etc from Amni-Ai v6.10+) as themed cards in the assistant message. **v2.4.0 wired Adam (Amni-Ai v6.9.4 GF(17) 2B) as a first-class autonomous brain** via OpenAI `/v1/chat/completions` on `127.0.0.1:7700`. Stale `:8001` / `:8002` saved URLs auto-remap to `:7700` (in addition to the prior `:8787` migration). Same 10 OpenAI tool-call functions, zero wire-shape changes on this side. v2.2.3 fixes Amni default startup by targeting the Amni-AI web server on port 7700, normalizing stale saved Amni base URLs, and auto-starting the local server immediately on initial config load.
 
@@ -16,7 +18,7 @@ Single-binary AI coding agent. Rust/Axum backend with embedded HTML UI. No Pytho
 ## Core Files
 src/main.rs: Axum web server + full agent engine
 - App state: sessions (HashMap w/ working_dir), config, cwd
-- 6 tools: read_file,write_file,edit_file,run_command,list_directory,search_files
+- 19 tools: read_file,write_file,edit_file,multi_edit,run_command,list_directory,search_files,web_fetch,web_search,memory_read,memory_write,git_status,git_diff,git_add,git_commit,git_log,run_tests,run_lint,run_format (TOOLS_JSON const; dispatched in exec_tool; git via git_run helper, quality tools via detect_*_command + run_shell)
 - Agent loop: unbounded (soft<100) LLM call->tool->repeat until no tools
 - UI header themed cwd display
 - LLM integration: OpenAI-compatible API (Ollama/OpenAI/Anthropic/xAI/Google/Amni via provider config)

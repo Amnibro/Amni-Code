@@ -4,8 +4,14 @@ Amni-Code GUI Installer
 Graphical installer for Amni-Code AI assistant
 """
 
-import tkinter as tk
-from tkinter import ttk, scrolledtext, messagebox
+try:
+    import tkinter as tk
+    from tkinter import ttk, scrolledtext, messagebox
+except ImportError:
+    print("ERROR: tkinter is not available in this Python install.\n"
+          "Install Python from python.org (its installers include Tk), or use the CLI installer:\n"
+          "    python install.py")
+    raise SystemExit(1)
 import threading
 import sys
 import subprocess
@@ -286,14 +292,21 @@ class GUInstaller:
                   font=('Segoe UI', 9, 'bold')).grid(row=0, column=0, sticky='w')
         self.model_vars = {}
         models_list = [
-            ("Qwen3.5-9B-Neo", "Jackrong/Qwen3.5-9B-Neo", True),
-            ("MLX-Qwen3.5-4B", "Jackrong/MLX-Qwen3.5-4B-Claude-4.6-Opus-Reasoning-Distilled-8bit", True),
+            ("Qwen3.5-9B-Neo", "Jackrong/Qwen3.5-9B-Neo", 12.0, False, "needs ~12GB VRAM"),
+            ("MLX-Qwen3.5-4B", "Jackrong/MLX-Qwen3.5-4B-Claude-4.6-Opus-Reasoning-Distilled-8bit", 0.0, True, "Apple Silicon only"),
         ]
-        for i, (name, repo, default) in enumerate(models_list):
-            var = tk.BooleanVar(value=default)
+        vram = self._quick_vram_gb()
+        is_mac = platform.system() == "Darwin"
+        hwtxt = (f"~{vram:.0f} GB VRAM detected" if vram > 0 else "VRAM unknown") + " - pre-selecting what fits"
+        ttk.Label(model_frame, text=hwtxt, style='Modern.TLabel',
+                  font=('Segoe UI', 8)).grid(row=0, column=1, sticky='w', padx=(12, 0))
+        for i, (name, repo, min_vram, mac_only, note) in enumerate(models_list):
+            fits = (is_mac if mac_only else True) and (vram <= 0 or vram >= min_vram)
+            badge = "  (fits your hardware)" if fits else f"  (skip - {note})"
+            var = tk.BooleanVar(value=fits)
             self.model_vars[repo] = (name, var)
             cb = tk.Checkbutton(
-                model_frame, text=name, variable=var,
+                model_frame, text=name + badge, variable=var,
                 bg=self.colors['bg_primary'], fg=self.colors['text_primary'],
                 selectcolor=self.colors['bg_secondary'],
                 activebackground=self.colors['bg_primary'],
@@ -691,6 +704,17 @@ class AmniCodeInstaller:
             print(f"Could not check for Python 3.13: {e}")
             return False
 
+    def _quick_vram_gb(self):
+        """Best-effort total VRAM (GB) for pre-selecting models in the picker (nvidia-smi; 0 if unknown)."""
+        try:
+            r = subprocess.run(["nvidia-smi", "--query-gpu=memory.total", "--format=csv,noheader,nounits"],
+                               capture_output=True, text=True, timeout=5)
+            if r.returncode == 0 and r.stdout.strip():
+                return round(int(r.stdout.strip().splitlines()[0]) / 1024, 1)
+        except Exception:
+            pass
+        return 0.0
+
     def detect_hardware(self):
         """Detect hardware acceleration"""
         print("\n[3/8] Detecting hardware acceleration...")
@@ -739,12 +763,12 @@ class AmniCodeInstaller:
 
         # Install PyTorch (separate because it has special index)
         print("Installing PyTorch...")
-        pytorch_cmd = "py -3.13 -m pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121"
+        pytorch_cmd = "py -3.13 -m pip install torch>=2.0.0 torchvision>=0.15.0 torchaudio>=2.0.0 --index-url https://download.pytorch.org/whl/cu121"
         pytorch_success = self.run_command(pytorch_cmd, check=False)
 
         # Install core ML packages
         print("Installing core ML packages...")
-        ml_cmd = "py -3.13 -m pip install huggingface_hub transformers accelerate safetensors"
+        ml_cmd = "py -3.13 -m pip install huggingface_hub>=0.23.0 transformers>=5.12.1 accelerate>=0.20.0 safetensors>=0.4.0 psutil>=5.9.0"
         ml_success = self.run_command(ml_cmd, check=False)
 
         # Install huggingface-cli for model downloads

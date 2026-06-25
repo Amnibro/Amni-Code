@@ -173,12 +173,12 @@ class AmniCodeInstaller:
         
         # Install PyTorch (separate because it has special index)
         print("Installing PyTorch...")
-        pytorch_cmd = "py -3.13 -m pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121"
+        pytorch_cmd = "py -3.13 -m pip install torch>=2.0.0 torchvision>=0.15.0 torchaudio>=2.0.0 --index-url https://download.pytorch.org/whl/cu121"
         pytorch_success = self.run_command(pytorch_cmd, check=False)
         
         # Install core ML packages
         print("Installing core ML packages...")
-        ml_cmd = "py -3.13 -m pip install huggingface_hub transformers accelerate safetensors"
+        ml_cmd = "py -3.13 -m pip install huggingface_hub>=0.23.0 transformers>=5.12.1 accelerate>=0.20.0 safetensors>=0.4.0 psutil>=5.9.0"
         ml_success = self.run_command(ml_cmd, check=False)
         
         # Install huggingface-cli for model downloads
@@ -217,24 +217,55 @@ class AmniCodeInstaller:
         print("Models directory created.")
         return True
 
+    def _detect_free_vram_gb(self):
+        """Best-effort free-VRAM detection (torch -> nvidia-smi -> 0)."""
+        try:
+            import torch
+            if torch.cuda.is_available():
+                free, _ = torch.cuda.mem_get_info()
+                return round(free / 1e9, 1)
+        except Exception:
+            pass
+        try:
+            r = subprocess.run(["nvidia-smi", "--query-gpu=memory.free", "--format=csv,noheader,nounits"],
+                               capture_output=True, text=True, timeout=5)
+            if r.returncode == 0 and r.stdout.strip():
+                return round(int(r.stdout.strip().splitlines()[0]) / 1024, 1)
+        except Exception:
+            pass
+        return 0.0
+
     def download_models(self):
-        """Download AI models"""
+        """Download AI models - hardware-aware: skip what won't fit or won't run on this box.
+        Amni-Code's brain is Adam via Amni-Ai (port 7700); local models are an optional offline extra."""
         print("\n[7/8] Downloading AI models...")
-        print("This may take several minutes depending on your internet speed...")
+        vram = self._detect_free_vram_gb()
+        is_mac = platform.system() == "Darwin"
+        print(f"Detected ~{vram} GB free VRAM | platform = {platform.system()}")
 
         models = [
-            ("Jackrong/Qwen3.5-9B-Neo", "models/Qwen3.5-9B-Neo"),
-            ("Jackrong/MLX-Qwen3.5-4B-Claude-4.6-Opus-Reasoning-Distilled-8bit", "models/MLX-Qwen3.5-4B")
+            {"repo": "Jackrong/Qwen3.5-9B-Neo", "dir": "models/Qwen3.5-9B-Neo",
+             "min_vram": 12.0, "mac_only": False, "note": "9B (needs ~12GB+ VRAM)"},
+            {"repo": "Jackrong/MLX-Qwen3.5-4B-Claude-4.6-Opus-Reasoning-Distilled-8bit", "dir": "models/MLX-Qwen3.5-4B",
+             "min_vram": 0.0, "mac_only": True, "note": "MLX 4B (Apple Silicon only)"},
         ]
-
-        for model_repo, local_dir in models:
-            print(f"\nDownloading {model_repo}...")
-            cmd = f"huggingface-cli download {model_repo} --local-dir {local_dir} --local-dir-use-symlinks False"
-            if not self.run_command(cmd, f"Downloading {model_repo}", check=False):
-                print(f"Failed to download {model_repo}. You can retry later or download manually.")
-
+        any_dl = False
+        for m in models:
+            if m["mac_only"] and not is_mac:
+                print(f"  Skipping {m['repo']} - {m['note']}, not this platform.")
+                continue
+            if vram > 0 and vram < m["min_vram"]:
+                print(f"  Skipping {m['repo']} - {m['note']}, only ~{vram}GB free here.")
+                continue
+            print(f"\nDownloading {m['repo']} ({m['note']})...")
+            cmd = f"huggingface-cli download {m['repo']} --local-dir {m['dir']} --local-dir-use-symlinks False"
+            if self.run_command(cmd, f"Downloading {m['repo']}", check=False):
+                any_dl = True
+            else:
+                print(f"Failed to download {m['repo']}. You can retry later or download manually.")
+        if not any_dl:
+            print("  No local model fit this hardware - Amni-Code will use the Adam brain via Amni-Ai (port 7700).")
         print("\nModel downloads completed.")
-        return True
         return True
 
     def create_shortcut(self):

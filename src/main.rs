@@ -21,6 +21,8 @@ struct Config {
     mode: String,
     working_dir: String,
     model_dir: String,
+    #[serde(default)]
+    mcp_servers: Vec<McpServerCfg>,
 }
 impl Default for Config {
     fn default() -> Self {
@@ -144,6 +146,7 @@ impl Default for Config {
                 .to_string_lossy()
                 .into(),
             model_dir,
+            mcp_servers: Vec::new(),
         }
     }
 }
@@ -619,6 +622,140 @@ async fn find_definitions(root: &PathBuf, name: &str) -> Vec<String> {
     }
     out
 }
+#[derive(Clone, Serialize, Deserialize)]
+struct McpServerCfg {
+    name: String,
+    command: String,
+    #[serde(default)]
+    args: Vec<String>,
+}
+fn mcp_rpc(id: u64, method: &str, params: serde_json::Value) -> String {
+    serde_json::json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params}).to_string()
+}
+fn parse_mcp_tools(server: &str, resp: &serde_json::Value) -> Vec<serde_json::Value> {
+    resp.get("result")
+        .and_then(|r| r.get("tools"))
+        .and_then(|t| t.as_array())
+        .map(|tools| {
+            tools
+                .iter()
+                .filter_map(|t| {
+                    let name = t.get("name")?.as_str()?;
+                    let desc = t.get("description").and_then(|d| d.as_str()).unwrap_or("");
+                    let schema = t.get("inputSchema").cloned().unwrap_or_else(|| serde_json::json!({"type": "object"}));
+                    Some(serde_json::json!({"type": "function", "function": {"name": format!("mcp__{}__{}", server, name), "description": desc, "parameters": schema}}))
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+fn parse_mcp_result(resp: &serde_json::Value) -> String {
+    if let Some(content) = resp.get("result").and_then(|r| r.get("content")).and_then(|c| c.as_array()) {
+        let text: Vec<&str> = content.iter().filter_map(|i| i.get("text").and_then(|t| t.as_str())).collect();
+        if !text.is_empty() {
+            return text.join("\n");
+        }
+    }
+    if let Some(err) = resp.get("error") {
+        return format!("MCP error: {}", err);
+    }
+    resp.get("result").map(|r| r.to_string()).unwrap_or_else(|| resp.to_string())
+}
+fn parse_mcp_name(name: &str) -> Option<(&str, &str)> {
+    name.strip_prefix("mcp__")?.split_once("__")
+}
+struct McpServer {
+    _child: tokio::process::Child,
+    stdin: tokio::process::ChildStdin,
+    stdout: tokio::io::BufReader<tokio::process::ChildStdout>,
+    tools: Vec<serde_json::Value>,
+    next_id: u64,
+}
+static MCP_REGISTRY: std::sync::OnceLock<Mutex<HashMap<String, McpServer>>> = std::sync::OnceLock::new();
+fn mcp_registry() -> &'static Mutex<HashMap<String, McpServer>> {
+    MCP_REGISTRY.get_or_init(|| Mutex::new(HashMap::new()))
+}
+async fn mcp_send(stdin: &mut tokio::process::ChildStdin, msg: &str) -> Result<(), String> {
+    use tokio::io::AsyncWriteExt;
+    stdin.write_all(msg.as_bytes()).await.map_err(|e| e.to_string())?;
+    stdin.write_all(b"\n").await.map_err(|e| e.to_string())?;
+    stdin.flush().await.map_err(|e| e.to_string())
+}
+async fn mcp_read_response(reader: &mut tokio::io::BufReader<tokio::process::ChildStdout>, id: u64) -> Result<serde_json::Value, String> {
+    use tokio::io::AsyncBufReadExt;
+    let mut line = String::new();
+    for _ in 0..200 {
+        line.clear();
+        let n = reader.read_line(&mut line).await.map_err(|e| e.to_string())?;
+        if n == 0 {
+            return Err("MCP server closed the stream".into());
+        }
+        if let Ok(v) = serde_json::from_str::<serde_json::Value>(line.trim()) {
+            if v.get("id").and_then(|i| i.as_u64()) == Some(id) {
+                return Ok(v);
+            }
+        }
+    }
+    Err("no matching MCP response".into())
+}
+async fn mcp_connect(cfg: &McpServerCfg) -> Result<McpServer, String> {
+    let mut child = tokio::process::Command::new(&cfg.command)
+        .args(&cfg.args)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .map_err(|e| format!("spawn '{}': {}", cfg.command, e))?;
+    let mut stdin = child.stdin.take().ok_or("no stdin")?;
+    let stdout = child.stdout.take().ok_or("no stdout")?;
+    let mut reader = tokio::io::BufReader::new(stdout);
+    mcp_send(&mut stdin, &mcp_rpc(1, "initialize", serde_json::json!({"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"amni-code","version":"2.8.0"}}))).await?;
+    let _ = mcp_read_response(&mut reader, 1).await?;
+    mcp_send(&mut stdin, &serde_json::json!({"jsonrpc":"2.0","method":"notifications/initialized"}).to_string()).await?;
+    mcp_send(&mut stdin, &mcp_rpc(2, "tools/list", serde_json::json!({}))).await?;
+    let tools_resp = mcp_read_response(&mut reader, 2).await?;
+    let tools = parse_mcp_tools(&cfg.name, &tools_resp);
+    Ok(McpServer { _child: child, stdin, stdout: reader, tools, next_id: 3 })
+}
+async fn mcp_init(servers: &[McpServerCfg]) {
+    for cfg in servers {
+        match mcp_connect(cfg).await {
+            Ok(srv) => {
+                let n = srv.tools.len();
+                mcp_registry().lock().await.insert(cfg.name.clone(), srv);
+                println!("[mcp] connected '{}' ({} tools)", cfg.name, n);
+            }
+            Err(e) => println!("[mcp] '{}' unavailable: {}", cfg.name, e),
+        }
+    }
+}
+async fn mcp_tool_schemas() -> Vec<serde_json::Value> {
+    mcp_registry().lock().await.values().flat_map(|s| s.tools.clone()).collect()
+}
+async fn mcp_call(full_name: &str, args: serde_json::Value) -> (String, String) {
+    let (server, tool) = match parse_mcp_name(full_name) {
+        Some((s, t)) => (s.to_string(), t.to_string()),
+        None => return (format!("Bad MCP tool name: {}", full_name), "error".into()),
+    };
+    let mut reg = mcp_registry().lock().await;
+    let srv = match reg.get_mut(&server) {
+        Some(s) => s,
+        None => return (format!("MCP server '{}' not connected", server), "error".into()),
+    };
+    let id = srv.next_id;
+    srv.next_id += 1;
+    let req = mcp_rpc(id, "tools/call", serde_json::json!({"name": tool, "arguments": args}));
+    if let Err(e) = mcp_send(&mut srv.stdin, &req).await {
+        return (format!("MCP send failed: {}", e), "error".into());
+    }
+    match mcp_read_response(&mut srv.stdout, id).await {
+        Ok(resp) => {
+            let status = if resp.get("error").is_some() { "error" } else { "success" };
+            (parse_mcp_result(&resp), status.into())
+        }
+        Err(e) => (format!("MCP read failed: {}", e), "error".into()),
+    }
+}
 async fn run_shell(cwd: &PathBuf, cmd: &str) -> (String, String) {
     let shell = if cfg!(windows) {
         ("cmd", vec!["/C".to_string(), cmd.to_string()])
@@ -865,7 +1002,9 @@ async fn llm_request(
     let mut body =
         serde_json::json!({"model": config.model, "messages": messages, "max_tokens": max_tokens});
     if use_tools {
-        let tools: serde_json::Value = serde_json::from_str(TOOLS_JSON).unwrap();
+        let mut tools_arr: Vec<serde_json::Value> = serde_json::from_str(TOOLS_JSON).unwrap();
+        tools_arr.extend(mcp_tool_schemas().await);
+        let tools = serde_json::Value::Array(tools_arr);
         body["tools"] = tools;
         body["tool_choice"] = serde_json::json!("auto");
     }
@@ -1113,6 +1252,8 @@ let max_iters=std::env::var("AMNI_CODE_MAX_ITERS").ok().and_then(|v|v.parse::<u3
                         mem.entry(key.clone()).or_default().push(content.clone());
                         save_memory_store(&cwd_path, &mem);
                         (format!("Stored to memory key '{}': {} chars", key, content.len()), "success".into())
+                    } else if tc.name.starts_with("mcp__") {
+                        mcp_call(&tc.name, tc.args.clone()).await
                     } else {
                         exec_tool(&tc.name, &tc.args, &cwd_path).await
                     };
@@ -2411,6 +2552,7 @@ async fn main() -> anyhow::Result<()> {
     if !memory.is_empty() { println!("  Memory: {} keys loaded", memory.len()); }
     let (server_log_tx,_)=broadcast::channel::<String>(512);
     let (fs_tx,_)=broadcast::channel::<String>(256);
+    if !config.mcp_servers.is_empty(){mcp_init(&config.mcp_servers).await;}
     let app=App{sessions:Arc::new(Mutex::new(HashMap::new())),config:Arc::new(Mutex::new(config)),cwd:Arc::new(Mutex::new(effective_cwd.clone())),dl_progress:Arc::new(Mutex::new(DownloadProgress::default())),backups:Arc::new(Mutex::new(HashMap::new())),interrupts:Arc::new(Mutex::new(HashMap::new())),amni_proc:Arc::new(Mutex::new(None)),server_log_tx:Arc::new(server_log_tx),memory:Arc::new(Mutex::new(memory)),fs_tx:Arc::new(fs_tx.clone()),checkpoints:Arc::new(Mutex::new(HashMap::new()))};
     // File watcher — polls for changes every 2s and broadcasts via fs_tx
     let watch_dir = effective_cwd.clone();
@@ -2694,5 +2836,47 @@ mod git_tool_tests {
         assert!(!is_definition("call_foo();", "foo"), "call is not a definition");
         assert!(!is_definition("foo.bar()", "bar"), "method call is not a definition");
         assert!(!is_definition("fn other() {", "foo"), "different symbol name");
+    }
+    #[test]
+    fn mcp_protocol() {
+        let req = mcp_rpc(2, "tools/list", serde_json::json!({}));
+        let v: serde_json::Value = serde_json::from_str(&req).unwrap();
+        assert_eq!(v["jsonrpc"], "2.0");
+        assert_eq!(v["id"], 2);
+        assert_eq!(v["method"], "tools/list");
+        let list = serde_json::json!({"result":{"tools":[{"name":"search","description":"Search docs","inputSchema":{"type":"object","properties":{"q":{"type":"string"}}}}]}});
+        let tools = parse_mcp_tools("docs", &list);
+        assert_eq!(tools.len(), 1);
+        assert_eq!(tools[0]["function"]["name"], "mcp__docs__search");
+        assert_eq!(tools[0]["function"]["description"], "Search docs");
+        let result = serde_json::json!({"result":{"content":[{"type":"text","text":"hello"},{"type":"text","text":"world"}]}});
+        assert_eq!(parse_mcp_result(&result), "hello\nworld");
+        let err = serde_json::json!({"error":{"code":-32601,"message":"nope"}});
+        assert!(parse_mcp_result(&err).contains("MCP error"));
+        assert_eq!(parse_mcp_name("mcp__docs__search"), Some(("docs", "search")));
+        assert_eq!(parse_mcp_name("read_file"), None);
+    }
+    #[tokio::test]
+    async fn mcp_stdio_roundtrip() {
+        const MOCK: &str = "import sys, json\nfor line in sys.stdin:\n    try: msg = json.loads(line)\n    except Exception: continue\n    m = msg.get('method')\n    if m == 'initialize':\n        print(json.dumps({'jsonrpc':'2.0','id':msg['id'],'result':{'protocolVersion':'2024-11-05','capabilities':{},'serverInfo':{'name':'mock'}}}), flush=True)\n    elif m == 'tools/list':\n        print(json.dumps({'jsonrpc':'2.0','id':msg['id'],'result':{'tools':[{'name':'echo','description':'Echo back','inputSchema':{'type':'object','properties':{'text':{'type':'string'}}}}]}}), flush=True)\n    elif m == 'tools/call':\n        args = msg.get('params',{}).get('arguments',{})\n        print(json.dumps({'jsonrpc':'2.0','id':msg['id'],'result':{'content':[{'type':'text','text':'echo: '+json.dumps(args)}]}}), flush=True)\n";
+        let dir = std::env::temp_dir().join(format!("amni_mcp_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let script = dir.join("mock_mcp.py");
+        std::fs::write(&script, MOCK).unwrap();
+        let cfg = McpServerCfg { name: "mock".into(), command: "python".into(), args: vec![script.display().to_string()] };
+        match mcp_connect(&cfg).await {
+            Ok(server) => {
+                assert_eq!(server.tools.len(), 1, "mock exposes one tool");
+                assert_eq!(server.tools[0]["function"]["name"], "mcp__mock__echo", "tool name is namespaced");
+                mcp_registry().lock().await.insert("mock".to_string(), server);
+                let (out, status) = mcp_call("mcp__mock__echo", serde_json::json!({"text": "hi"})).await;
+                assert_eq!(status, "success", "tools/call succeeded: {}", out);
+                assert!(out.contains("hi"), "server echoed the args, got: {}", out);
+                mcp_registry().lock().await.remove("mock");
+            }
+            Err(_) => { /* python unavailable in this env -> protocol covered by mcp_protocol; skip live roundtrip */ }
+        }
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

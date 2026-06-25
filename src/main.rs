@@ -8,7 +8,7 @@ struct DownloadProgress {
     done: bool,
     error: String,
 }
-#[derive(Clone)]struct App{sessions:Arc<Mutex<HashMap<String,Session>>>,config:Arc<Mutex<Config>>,cwd:Arc<Mutex<PathBuf>>,dl_progress:Arc<Mutex<DownloadProgress>>,backups:Arc<Mutex<HashMap<String,Vec<(String,Option<String>)>>>>,interrupts:Arc<Mutex<HashMap<String,Arc<AtomicBool>>>>,amni_proc:Arc<Mutex<Option<tokio::process::Child>>>,server_log_tx:Arc<broadcast::Sender<String>>,memory:Arc<Mutex<HashMap<String,Vec<String>>>>,fs_tx:Arc<broadcast::Sender<String>>}
+#[derive(Clone)]struct App{sessions:Arc<Mutex<HashMap<String,Session>>>,config:Arc<Mutex<Config>>,cwd:Arc<Mutex<PathBuf>>,dl_progress:Arc<Mutex<DownloadProgress>>,backups:Arc<Mutex<HashMap<String,Vec<(String,Option<String>)>>>>,interrupts:Arc<Mutex<HashMap<String,Arc<AtomicBool>>>>,amni_proc:Arc<Mutex<Option<tokio::process::Child>>>,server_log_tx:Arc<broadcast::Sender<String>>,memory:Arc<Mutex<HashMap<String,Vec<String>>>>,fs_tx:Arc<broadcast::Sender<String>>,checkpoints:Arc<Mutex<HashMap<String,Vec<Checkpoint>>>>}
 #[derive(Clone,Default)]struct Session{messages:Vec<serde_json::Value>,working_dir:String}
 #[derive(Clone, Serialize, Deserialize)]
 struct Config {
@@ -1118,6 +1118,77 @@ async fn handle_accept(State(app): State<App>, Json(req): Json<UndoReq>) -> Json
     app.backups.lock().await.remove(&req.session_id);
     Json(serde_json::json!({"status": "ok"}))
 }
+#[derive(Clone)]
+struct Checkpoint {
+    label: String,
+    messages: Vec<serde_json::Value>,
+    files: Vec<(String, Option<String>)>,
+}
+async fn snapshot_files(paths: &[String]) -> Vec<(String, Option<String>)> {
+    let mut out = Vec::new();
+    for p in paths {
+        out.push((p.clone(), tokio::fs::read_to_string(p).await.ok()));
+    }
+    out
+}
+async fn restore_files(files: &[(String, Option<String>)]) -> usize {
+    let mut n = 0;
+    for (path, content) in files {
+        let ok = match content {
+            Some(c) => tokio::fs::write(path, c).await.is_ok(),
+            None => {
+                let _ = tokio::fs::remove_file(path).await;
+                true
+            }
+        };
+        if ok {
+            n += 1;
+        }
+    }
+    n
+}
+#[derive(Deserialize)]
+struct CheckpointReq {
+    session_id: String,
+    label: Option<String>,
+}
+async fn handle_checkpoint_create(State(app): State<App>, Json(req): Json<CheckpointReq>) -> Json<serde_json::Value> {
+    let messages = app.sessions.lock().await.get(&req.session_id).map(|s| s.messages.clone()).unwrap_or_default();
+    let paths: Vec<String> = app.backups.lock().await.get(&req.session_id).map(|b| b.iter().map(|(p, _)| p.clone()).collect()).unwrap_or_default();
+    let files = snapshot_files(&paths).await;
+    let (mc, fc) = (messages.len(), files.len());
+    let mut cps = app.checkpoints.lock().await;
+    let list = cps.entry(req.session_id.clone()).or_default();
+    let label = req.label.unwrap_or_else(|| format!("checkpoint {}", list.len() + 1));
+    list.push(Checkpoint { label: label.clone(), messages, files });
+    Json(serde_json::json!({"status": "ok", "index": list.len() - 1, "label": label, "messages": mc, "files": fc}))
+}
+async fn handle_checkpoint_list(State(app): State<App>, Json(req): Json<CheckpointReq>) -> Json<serde_json::Value> {
+    let cps = app.checkpoints.lock().await;
+    let list: Vec<serde_json::Value> = cps
+        .get(&req.session_id)
+        .map(|l| l.iter().enumerate().map(|(i, c)| serde_json::json!({"index": i, "label": c.label, "messages": c.messages.len(), "files": c.files.len()})).collect())
+        .unwrap_or_default();
+    Json(serde_json::json!({"checkpoints": list}))
+}
+#[derive(Deserialize)]
+struct RestoreReq {
+    session_id: String,
+    index: usize,
+}
+async fn handle_checkpoint_restore(State(app): State<App>, Json(req): Json<RestoreReq>) -> Json<serde_json::Value> {
+    let cp = app.checkpoints.lock().await.get(&req.session_id).and_then(|l| l.get(req.index).cloned());
+    match cp {
+        Some(c) => {
+            let n = restore_files(&c.files).await;
+            if let Some(s) = app.sessions.lock().await.get_mut(&req.session_id) {
+                s.messages = c.messages.clone();
+            }
+            Json(serde_json::json!({"status": "ok", "restored_files": n, "label": c.label}))
+        }
+        None => Json(serde_json::json!({"status": "not_found"})),
+    }
+}
 #[derive(Deserialize)]
 struct SteerReq {
     session_id: String,
@@ -2214,7 +2285,7 @@ async fn main() -> anyhow::Result<()> {
     if !memory.is_empty() { println!("  Memory: {} keys loaded", memory.len()); }
     let (server_log_tx,_)=broadcast::channel::<String>(512);
     let (fs_tx,_)=broadcast::channel::<String>(256);
-    let app=App{sessions:Arc::new(Mutex::new(HashMap::new())),config:Arc::new(Mutex::new(config)),cwd:Arc::new(Mutex::new(effective_cwd.clone())),dl_progress:Arc::new(Mutex::new(DownloadProgress::default())),backups:Arc::new(Mutex::new(HashMap::new())),interrupts:Arc::new(Mutex::new(HashMap::new())),amni_proc:Arc::new(Mutex::new(None)),server_log_tx:Arc::new(server_log_tx),memory:Arc::new(Mutex::new(memory)),fs_tx:Arc::new(fs_tx.clone())};
+    let app=App{sessions:Arc::new(Mutex::new(HashMap::new())),config:Arc::new(Mutex::new(config)),cwd:Arc::new(Mutex::new(effective_cwd.clone())),dl_progress:Arc::new(Mutex::new(DownloadProgress::default())),backups:Arc::new(Mutex::new(HashMap::new())),interrupts:Arc::new(Mutex::new(HashMap::new())),amni_proc:Arc::new(Mutex::new(None)),server_log_tx:Arc::new(server_log_tx),memory:Arc::new(Mutex::new(memory)),fs_tx:Arc::new(fs_tx.clone()),checkpoints:Arc::new(Mutex::new(HashMap::new()))};
     // File watcher — polls for changes every 2s and broadcasts via fs_tx
     let watch_dir = effective_cwd.clone();
     let fs_tx_clone = fs_tx.clone();
@@ -2260,6 +2331,9 @@ async fn main() -> anyhow::Result<()> {
         )
         .route("/api/undo", post(handle_undo))
         .route("/api/accept", post(handle_accept))
+        .route("/api/checkpoint", post(handle_checkpoint_create))
+        .route("/api/checkpoints", post(handle_checkpoint_list))
+        .route("/api/restore", post(handle_checkpoint_restore))
         .route("/api/interrupt", post(handle_interrupt))
         .route("/api/steer", post(handle_steer))
         .route("/api/server-start", post(handle_server_start))
@@ -2429,5 +2503,24 @@ mod git_tool_tests {
         assert!(extract_mentions("email me at foo@bar.com").is_empty());
         assert!(extract_mentions("just @someuser here").is_empty());
         assert!(extract_mentions("no mentions here").is_empty());
+    }
+    #[tokio::test]
+    async fn checkpoint_snapshot_restore() {
+        let dir = std::env::temp_dir().join(format!("amni_cp_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let f1 = dir.join("a.txt").display().to_string();
+        let f2 = dir.join("b.txt").display().to_string();
+        std::fs::write(&f1, "original-a").unwrap();
+        let snap = snapshot_files(&[f1.clone(), f2.clone()]).await;
+        assert_eq!(snap[0].1, Some("original-a".to_string()));
+        assert_eq!(snap[1].1, None, "b.txt did not exist at snapshot time");
+        std::fs::write(&f1, "MODIFIED-a").unwrap();
+        std::fs::write(&f2, "new-b").unwrap();
+        let n = restore_files(&snap).await;
+        assert_eq!(n, 2);
+        assert_eq!(std::fs::read_to_string(&f1).unwrap(), "original-a", "a.txt restored to snapshot");
+        assert!(!std::path::Path::new(&f2).exists(), "b.txt deleted (was absent at snapshot)");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

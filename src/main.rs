@@ -187,9 +187,10 @@ const TOOLS_JSON: &str = r#"[
   {"type":"function","function":{"name":"git_add","description":"Stage changes for the next commit. 'path' defaults to '.' (everything).","parameters":{"type":"object","properties":{"path":{"type":"string","description":"File or dir to stage (default '.')"}}}}},
   {"type":"function","function":{"name":"git_commit","description":"Commit staged changes with a message. Run git_add first to stage. Requires a non-empty message.","parameters":{"type":"object","properties":{"message":{"type":"string","description":"Commit message"}},"required":["message"]}}},
   {"type":"function","function":{"name":"git_log","description":"Show recent commits in oneline format.","parameters":{"type":"object","properties":{"count":{"type":"integer","description":"How many commits to show (default 15)"}}}}},
-  {"type":"function","function":{"name":"run_tests","description":"Run the project's test suite (auto-detects cargo/go/pytest/npm from the working dir; pass 'command' to override). Returns pass/fail + output. ALWAYS run after changing code and fix failures before finishing.","parameters":{"type":"object","properties":{"command":{"type":"string","description":"Optional explicit test command instead of auto-detect"}}}}}
+  {"type":"function","function":{"name":"run_tests","description":"Run the project's test suite (auto-detects cargo/go/pytest/npm from the working dir; pass 'command' to override). Returns pass/fail + output. ALWAYS run after changing code and fix failures before finishing.","parameters":{"type":"object","properties":{"command":{"type":"string","description":"Optional explicit test command instead of auto-detect"}}}}},
+  {"type":"function","function":{"name":"run_lint","description":"Run the project's linter (auto-detects clippy/go vet/ruff/eslint from the working dir; pass 'command' to override). Surfaces code-quality and correctness diagnostics. Run after edits alongside run_tests.","parameters":{"type":"object","properties":{"command":{"type":"string","description":"Optional explicit lint command instead of auto-detect"}}}}}
 ]"#;
-const SYSTEM_PROMPT:&str="You are Amni-Code,an expert AI coding agent.Your working dir is:{CWD}\n\nCRITICAL:chain actions,NEVER stop after 1 tool,explore w/tools first,read key files before edits,verify after changes,concise,base paths on cwd,fix errors+retry.\n\nTools:read_file,write_file,edit_file,run_command,list_directory,search_files,web_fetch,web_search,memory_read,memory_write,git_status,git_diff,git_add,git_commit,git_log,run_tests\n\nVerify:after editing code,call run_tests and fix any failures before reporting done (write->test->fix->retest until green;never claim success on a red suite).\n\nGit:prefer the first-class git_* tools over raw run_command for version control;after a meaningful set of edits offer to git_add+git_commit with a clear message;use git_status/git_diff to review before committing.\n\nSupport /interrupt (stop gen) & steering (append mid-gen context).\n\n{CUSTOM_INSTRUCTIONS}";
+const SYSTEM_PROMPT:&str="You are Amni-Code,an expert AI coding agent.Your working dir is:{CWD}\n\nCRITICAL:chain actions,NEVER stop after 1 tool,explore w/tools first,read key files before edits,verify after changes,concise,base paths on cwd,fix errors+retry.\n\nTools:read_file,write_file,edit_file,run_command,list_directory,search_files,web_fetch,web_search,memory_read,memory_write,git_status,git_diff,git_add,git_commit,git_log,run_tests,run_lint\n\nVerify:after editing code,call run_tests (and run_lint for code quality) and fix failures before reporting done (write->test->fix->retest until green;never claim success on a red suite).\n\nGit:prefer the first-class git_* tools over raw run_command for version control;after a meaningful set of edits offer to git_add+git_commit with a clear message;use git_status/git_diff to review before committing.\n\nSupport /interrupt (stop gen) & steering (append mid-gen context).\n\n{CUSTOM_INSTRUCTIONS}";
 #[derive(Deserialize)]struct ChatReq{message:String,session_id:Option<String>,working_dir:Option<String>}
 #[derive(Serialize)]
 struct ChatRes {
@@ -421,6 +422,17 @@ async fn exec_tool(name: &str, args: &serde_json::Value, cwd: &PathBuf) -> (Stri
                 }
             }
         }
+        "run_lint" => {
+            let cmd = args.get("command").and_then(|c| c.as_str()).filter(|s| !s.is_empty()).map(|s| s.to_string())
+                .or_else(|| detect_lint_command(cwd).map(|s| s.to_string()));
+            match cmd {
+                None => ("No linter detected (looked for Cargo.toml, go.mod, ruff.toml/pyproject.toml, eslint config, package.json). Pass an explicit 'command'.".into(), "error".into()),
+                Some(c) => {
+                    let (out, status) = run_shell(cwd, &c).await;
+                    (format!("$ {}\n{}", c, out), status)
+                }
+            }
+        }
         _ => (format!("Unknown tool: {}", name), "error".into()),
     }
 }
@@ -462,6 +474,21 @@ fn detect_test_command(cwd: &PathBuf) -> Option<&'static str> {
         Some("python -m pytest -q")
     } else if cwd.join("package.json").exists() {
         Some("npm test")
+    } else {
+        None
+    }
+}
+fn detect_lint_command(cwd: &PathBuf) -> Option<&'static str> {
+    if cwd.join("Cargo.toml").exists() {
+        Some("cargo clippy --quiet --all-targets")
+    } else if cwd.join("go.mod").exists() {
+        Some("go vet ./...")
+    } else if cwd.join("ruff.toml").exists() || cwd.join("pyproject.toml").exists() {
+        Some("ruff check .")
+    } else if cwd.join(".eslintrc.json").exists() || cwd.join(".eslintrc.js").exists() || cwd.join(".eslintrc.cjs").exists() || cwd.join("eslint.config.js").exists() || cwd.join("eslint.config.mjs").exists() {
+        Some("npx --no-install eslint .")
+    } else if cwd.join("package.json").exists() {
+        Some("npm run lint --if-present")
     } else {
         None
     }
@@ -2330,5 +2357,25 @@ mod git_tool_tests {
         assert_eq!(parse_slash("hello world"), None);
         assert_eq!(parse_slash("/unknowncmd"), None);
         assert_eq!(parse_slash("not /a slash"), None);
+    }
+    #[test]
+    fn lint_command_detection() {
+        let base = std::env::temp_dir().join(format!("amni_lint_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let mk = |sub: &str, marker: &str| -> PathBuf {
+            let d = base.join(sub);
+            std::fs::create_dir_all(&d).unwrap();
+            std::fs::write(d.join(marker), "x").unwrap();
+            d
+        };
+        assert_eq!(detect_lint_command(&mk("rust", "Cargo.toml")), Some("cargo clippy --quiet --all-targets"));
+        assert_eq!(detect_lint_command(&mk("go", "go.mod")), Some("go vet ./..."));
+        assert_eq!(detect_lint_command(&mk("py", "pyproject.toml")), Some("ruff check ."));
+        assert_eq!(detect_lint_command(&mk("js", ".eslintrc.json")), Some("npx --no-install eslint ."));
+        assert_eq!(detect_lint_command(&mk("npm", "package.json")), Some("npm run lint --if-present"));
+        let empty = base.join("empty");
+        std::fs::create_dir_all(&empty).unwrap();
+        assert_eq!(detect_lint_command(&empty), None);
+        let _ = std::fs::remove_dir_all(&base);
     }
 }

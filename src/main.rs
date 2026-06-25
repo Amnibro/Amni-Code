@@ -178,9 +178,14 @@ const TOOLS_JSON: &str = r#"[
   {"type":"function","function":{"name":"web_fetch","description":"Fetch a webpage URL and return its text content (HTML stripped). Use for documentation, GitHub repos, articles.","parameters":{"type":"object","properties":{"url":{"type":"string","description":"Full URL (http/https)"},"max_chars":{"type":"integer","description":"Max chars to return (default 6000)"}},"required":["url"]}}},
   {"type":"function","function":{"name":"web_search","description":"Search the web via DuckDuckGo. Returns titles, URLs, snippets.","parameters":{"type":"object","properties":{"query":{"type":"string","description":"Search query"},"max_results":{"type":"integer","description":"Max results (default 5, max 10)"}},"required":["query"]}}},
   {"type":"function","function":{"name":"memory_read","description":"Read persistent memory notes. Returns stored facts/preferences for a key.","parameters":{"type":"object","properties":{"key":{"type":"string","description":"Memory key to read (e.g. 'project_notes', 'preferences')"}},"required":["key"]}}},
-  {"type":"function","function":{"name":"memory_write","description":"Write to persistent memory. Stores facts/preferences that persist across sessions.","parameters":{"type":"object","properties":{"key":{"type":"string","description":"Memory key"},"content":{"type":"string","description":"Content to store (appended to existing)"}},"required":["key","content"]}}}
+  {"type":"function","function":{"name":"memory_write","description":"Write to persistent memory. Stores facts/preferences that persist across sessions.","parameters":{"type":"object","properties":{"key":{"type":"string","description":"Memory key"},"content":{"type":"string","description":"Content to store (appended to existing)"}},"required":["key","content"]}}},
+  {"type":"function","function":{"name":"git_status","description":"Show git status: current branch plus changed/staged files (short format). Use this to see what you've modified.","parameters":{"type":"object","properties":{}}}},
+  {"type":"function","function":{"name":"git_diff","description":"Show the git diff of unstaged changes, optionally for a single path. Review changes before committing.","parameters":{"type":"object","properties":{"path":{"type":"string","description":"Optional file or dir to diff"}}}}},
+  {"type":"function","function":{"name":"git_add","description":"Stage changes for the next commit. 'path' defaults to '.' (everything).","parameters":{"type":"object","properties":{"path":{"type":"string","description":"File or dir to stage (default '.')"}}}}},
+  {"type":"function","function":{"name":"git_commit","description":"Commit staged changes with a message. Run git_add first to stage. Requires a non-empty message.","parameters":{"type":"object","properties":{"message":{"type":"string","description":"Commit message"}},"required":["message"]}}},
+  {"type":"function","function":{"name":"git_log","description":"Show recent commits in oneline format.","parameters":{"type":"object","properties":{"count":{"type":"integer","description":"How many commits to show (default 15)"}}}}}
 ]"#;
-const SYSTEM_PROMPT:&str="You are Amni-Code,an expert AI coding agent.Your working dir is:{CWD}\n\nCRITICAL:chain actions,NEVER stop after 1 tool,explore w/tools first,read key files before edits,verify after changes,concise,base paths on cwd,fix errors+retry.\n\nTools:read_file,write_file,edit_file,run_command,list_directory,search_files,web_fetch,web_search,memory_read,memory_write\n\nSupport /interrupt (stop gen) & steering (append mid-gen context).\n\n{CUSTOM_INSTRUCTIONS}";
+const SYSTEM_PROMPT:&str="You are Amni-Code,an expert AI coding agent.Your working dir is:{CWD}\n\nCRITICAL:chain actions,NEVER stop after 1 tool,explore w/tools first,read key files before edits,verify after changes,concise,base paths on cwd,fix errors+retry.\n\nTools:read_file,write_file,edit_file,run_command,list_directory,search_files,web_fetch,web_search,memory_read,memory_write,git_status,git_diff,git_add,git_commit,git_log\n\nGit:prefer the first-class git_* tools over raw run_command for version control;after a meaningful set of edits offer to git_add+git_commit with a clear message;use git_status/git_diff to review before committing.\n\nSupport /interrupt (stop gen) & steering (append mid-gen context).\n\n{CUSTOM_INSTRUCTIONS}";
 #[derive(Deserialize)]struct ChatReq{message:String,session_id:Option<String>,working_dir:Option<String>}
 #[derive(Serialize)]
 struct ChatRes {
@@ -379,7 +384,54 @@ async fn exec_tool(name: &str, args: &serde_json::Value, cwd: &PathBuf) -> (Stri
         }
         "web_fetch" => exec_web_fetch(args).await,
         "web_search" => exec_web_search(args).await,
+        "git_status" => git_run(cwd, &["status", "--short", "--branch"]).await,
+        "git_diff" => match args.get("path").and_then(|p| p.as_str()).filter(|s| !s.is_empty()) {
+            Some(p) => git_run(cwd, &["diff", "--", p]).await,
+            None => git_run(cwd, &["diff"]).await,
+        },
+        "git_add" => {
+            let path = args.get("path").and_then(|p| p.as_str()).filter(|s| !s.is_empty()).unwrap_or(".");
+            git_run(cwd, &["add", "--", path]).await
+        }
+        "git_commit" => {
+            let msg = args.get("message").and_then(|m| m.as_str()).unwrap_or("");
+            if msg.trim().is_empty() {
+                ("Error: git_commit requires a non-empty 'message'".into(), "error".into())
+            } else {
+                git_run(cwd, &["commit", "-m", msg]).await
+            }
+        }
+        "git_log" => {
+            let n = args.get("count").and_then(|c| c.as_u64()).unwrap_or(15).clamp(1, 100).to_string();
+            git_run(cwd, &["log", "--oneline", "-n", n.as_str()]).await
+        }
         _ => (format!("Unknown tool: {}", name), "error".into()),
+    }
+}
+async fn git_run(cwd: &PathBuf, gitargs: &[&str]) -> (String, String) {
+    match tokio::process::Command::new("git")
+        .args(gitargs)
+        .current_dir(cwd)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
+        .await
+    {
+        Ok(o) => {
+            let mut out = format!(
+                "{}{}",
+                String::from_utf8_lossy(&o.stdout),
+                if o.stderr.is_empty() { String::new() } else { format!("\n{}", String::from_utf8_lossy(&o.stderr)) }
+            );
+            out = out.trim().to_string();
+            if out.len() > 10000 {
+                out = format!("{}...(truncated)", &out[..10000]);
+            } else if out.is_empty() {
+                out = "(no output)".into();
+            }
+            (out, if o.status.success() { "success".into() } else { "error".into() })
+        }
+        Err(e) => (format!("git not available: {}", e), "error".into()),
     }
 }
 fn strip_html(html: &str) -> String {
@@ -2064,4 +2116,35 @@ async fn main() -> anyhow::Result<()> {
         });
     }
     Ok(())
+}
+#[cfg(test)]
+mod git_tool_tests {
+    use super::*;
+    #[tokio::test]
+    async fn git_tools_roundtrip() {
+        let dir = std::env::temp_dir().join(format!("amni_git_test_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let cwd = dir.clone();
+        let _ = git_run(&cwd, &["init"]).await;
+        let _ = git_run(&cwd, &["config", "user.email", "test@amni.local"]).await;
+        let _ = git_run(&cwd, &["config", "user.name", "Amni Test"]).await;
+        std::fs::write(dir.join("hello.txt"), "hi").unwrap();
+        let (s, st) = exec_tool("git_status", &serde_json::json!({}), &cwd).await;
+        assert_eq!(st, "success");
+        assert!(s.contains("hello.txt"), "status should list hello.txt, got: {}", s);
+        let (_, st2) = exec_tool("git_add", &serde_json::json!({"path": "."}), &cwd).await;
+        assert_eq!(st2, "success");
+        let (c, st3) = exec_tool("git_commit", &serde_json::json!({"message": "first commit"}), &cwd).await;
+        assert_eq!(st3, "success", "commit failed: {}", c);
+        let (lg, st4) = exec_tool("git_log", &serde_json::json!({"count": 5}), &cwd).await;
+        assert_eq!(st4, "success");
+        assert!(lg.contains("first commit"), "log should contain the commit, got: {}", lg);
+        let (_, st5) = exec_tool("git_commit", &serde_json::json!({"message": "   "}), &cwd).await;
+        assert_eq!(st5, "error", "empty-message commit must be rejected");
+        let (u, st6) = exec_tool("definitely_not_a_tool", &serde_json::json!({}), &cwd).await;
+        assert_eq!(st6, "error");
+        assert!(u.contains("Unknown tool"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

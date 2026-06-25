@@ -424,6 +424,13 @@ document.querySelectorAll('[data-i18n-title]').forEach(el=>{const k=el.getAttrib
       </div>
     </div>
   </div>
+  <label data-i18n="agent_mode">Agent mode</label>
+  <select id="cfg-mode" onchange="saveConfig()">
+    <option value="plan">Plan — propose changes, don't apply (read-only)</option>
+    <option value="edit">Edit — apply changes (default)</option>
+    <option value="autonomous">Autonomous — run everything freely</option>
+  </select>
+  <p style="font-size:11px;color:var(--text2);margin-top:4px;margin-bottom:10px" data-i18n="agent_mode_desc">Plan mode lets the agent explore and propose a full plan without touching files or running commands. Switch to Edit or Autonomous to apply.</p>
   <div class="toggle-row">
     <span data-i18n="auto_approve">Auto-approve all agent actions</span>
     <div class="toggle" id="cfg-auto" onclick="this.classList.toggle('on')"></div>
@@ -852,7 +859,7 @@ async function loadConfig(){
     $('#cfg-provider').value = c.provider;
     $('#cfg-key').value = c.api_key;
     $('#cfg-url').value = c.base_url;
-$('#cfg-dir').value=c.working_dir;$('#cwd-path').textContent=c.working_dir||'unknown';if(c.model_dir)$('#cfg-model-dir').value=c.model_dir;if(c.auto_approve)$('#cfg-auto').classList.add('on');else $('#cfg-auto').classList.remove('on');if(c.api_key)$('#key-src').textContent='(from ENV)';const noKey=c.provider==='ollama'||c.provider==='local'||c.provider==='amni';$('#model-dir-section').style.display=(c.provider==='ollama'||c.provider==='local')?'block':'none';$('#api-key-label').style.display=noKey?'none':'block';$('#cfg-key').style.display=noKey?'none':'block';if(c.provider==='amni'||c.provider==='local')checkAndStartServer();else await loadModels(c.model);loadDirs(c.working_dir);loadSidebar(c.working_dir);
+$('#cfg-dir').value=c.working_dir;$('#cwd-path').textContent=c.working_dir||'unknown';if(c.model_dir)$('#cfg-model-dir').value=c.model_dir;if(c.auto_approve)$('#cfg-auto').classList.add('on');else $('#cfg-auto').classList.remove('on');$('#cfg-mode').value=c.mode||'edit';if(c.api_key)$('#key-src').textContent='(from ENV)';const noKey=c.provider==='ollama'||c.provider==='local'||c.provider==='amni';$('#model-dir-section').style.display=(c.provider==='ollama'||c.provider==='local')?'block':'none';$('#api-key-label').style.display=noKey?'none':'block';$('#cfg-key').style.display=noKey?'none':'block';if(c.provider==='amni'||c.provider==='local')checkAndStartServer();else await loadModels(c.model);loadDirs(c.working_dir);loadSidebar(c.working_dir);
   } catch(e){console.error('loadConfig:',e);}
 }
 async function loadModels(current){
@@ -987,6 +994,7 @@ async function saveConfig(){
         api_key: $('#cfg-key').value,
         base_url: $('#cfg-url').value,
         working_dir: $('#cfg-dir').value,
+        mode: $('#cfg-mode').value,
         model_dir: $('#cfg-model-dir').value,
         auto_approve: $('#cfg-auto').classList.contains('on')
       })

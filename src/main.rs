@@ -17,6 +17,8 @@ struct Config {
     api_key: String,
     base_url: String,
     auto_approve: bool,
+    #[serde(default)]
+    mode: String,
     working_dir: String,
     model_dir: String,
 }
@@ -136,6 +138,7 @@ impl Default for Config {
             api_key: key,
             base_url,
             auto_approve: false,
+            mode: "edit".into(),
             working_dir: std::env::current_dir()
                 .unwrap_or_default()
                 .to_string_lossy()
@@ -208,6 +211,7 @@ struct ConfigReq {
     api_key: Option<String>,
     base_url: Option<String>,
     auto_approve: Option<bool>,
+    mode: Option<String>,
     working_dir: Option<String>,
     model_dir: Option<String>,
 }
@@ -433,6 +437,9 @@ async fn git_run(cwd: &PathBuf, gitargs: &[&str]) -> (String, String) {
         }
         Err(e) => (format!("git not available: {}", e), "error".into()),
     }
+}
+fn is_mutating_tool(name: &str) -> bool {
+    matches!(name, "write_file" | "edit_file" | "run_command" | "git_add" | "git_commit" | "memory_write")
 }
 fn strip_html(html: &str) -> String {
     let mut out = String::with_capacity(html.len() / 2);
@@ -773,7 +780,11 @@ let max_iters=std::env::var("AMNI_CODE_MAX_ITERS").ok().and_then(|v|v.parse::<u3
                             }
                         }
                     }
-                    let (output, status) = if tc.name == "memory_read" {
+                    let amni_mode = { app.config.lock().await.mode.clone() };
+                    let (output, status) = if amni_mode == "plan" && is_mutating_tool(&tc.name) {
+                        let argp: String = serde_json::to_string(&tc.args).unwrap_or_default().chars().take(220).collect();
+                        (format!("[PLAN MODE] Proposed (not executed): {}({}). You are in plan mode (read-only) - keep exploring with read-only tools, present the full plan, then tell the user to switch to edit or autonomous mode to apply it.", tc.name, argp), "planned".into())
+                    } else if tc.name == "memory_read" {
                         let key = tc.args["key"].as_str().unwrap_or("").to_string();
                         let mem = app.memory.lock().await;
                         let entries = mem.get(&key).cloned().unwrap_or_default();
@@ -872,6 +883,9 @@ async fn handle_config_set(State(app): State<App>, Json(req): Json<ConfigReq>) -
     }
     if let Some(v) = req.auto_approve {
         cfg.auto_approve = v;
+    }
+    if let Some(v) = req.mode {
+        cfg.mode = v;
     }
     if let Some(v) = req.working_dir {
         cfg.working_dir = v.clone();
@@ -2146,5 +2160,19 @@ mod git_tool_tests {
         assert_eq!(st6, "error");
         assert!(u.contains("Unknown tool"));
         let _ = std::fs::remove_dir_all(&dir);
+    }
+    #[test]
+    fn mode_gate_classification() {
+        for t in ["read_file","list_directory","search_files","git_status","git_diff","git_log","web_fetch","web_search","memory_read"] {
+            assert!(!is_mutating_tool(t), "{} should be read-only (allowed in plan mode)", t);
+        }
+        for t in ["write_file","edit_file","run_command","git_add","git_commit","memory_write"] {
+            assert!(is_mutating_tool(t), "{} should be mutating (gated in plan mode)", t);
+        }
+        let gated = |mode: &str, tool: &str| mode == "plan" && is_mutating_tool(tool);
+        assert!(gated("plan", "write_file"), "plan mode must gate write_file");
+        assert!(!gated("plan", "read_file"), "plan mode must allow read_file");
+        assert!(!gated("edit", "write_file"), "edit mode executes write_file");
+        assert!(!gated("autonomous", "run_command"), "autonomous executes run_command");
     }
 }

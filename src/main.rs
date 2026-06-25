@@ -188,9 +188,10 @@ const TOOLS_JSON: &str = r#"[
   {"type":"function","function":{"name":"git_commit","description":"Commit staged changes with a message. Run git_add first to stage. Requires a non-empty message.","parameters":{"type":"object","properties":{"message":{"type":"string","description":"Commit message"}},"required":["message"]}}},
   {"type":"function","function":{"name":"git_log","description":"Show recent commits in oneline format.","parameters":{"type":"object","properties":{"count":{"type":"integer","description":"How many commits to show (default 15)"}}}}},
   {"type":"function","function":{"name":"run_tests","description":"Run the project's test suite (auto-detects cargo/go/pytest/npm from the working dir; pass 'command' to override). Returns pass/fail + output. ALWAYS run after changing code and fix failures before finishing.","parameters":{"type":"object","properties":{"command":{"type":"string","description":"Optional explicit test command instead of auto-detect"}}}}},
-  {"type":"function","function":{"name":"run_lint","description":"Run the project's linter (auto-detects clippy/go vet/ruff/eslint from the working dir; pass 'command' to override). Surfaces code-quality and correctness diagnostics. Run after edits alongside run_tests.","parameters":{"type":"object","properties":{"command":{"type":"string","description":"Optional explicit lint command instead of auto-detect"}}}}}
+  {"type":"function","function":{"name":"run_lint","description":"Run the project's linter (auto-detects clippy/go vet/ruff/eslint from the working dir; pass 'command' to override). Surfaces code-quality and correctness diagnostics. Run after edits alongside run_tests.","parameters":{"type":"object","properties":{"command":{"type":"string","description":"Optional explicit lint command instead of auto-detect"}}}}},
+  {"type":"function","function":{"name":"multi_edit","description":"Apply multiple find/replace edits to ONE file atomically (all-or-nothing). Each edit replaces the first occurrence of old_string with new_string, applied in order. If any old_string is not found, NOTHING is written. Prefer this over several edit_file calls to the same file.","parameters":{"type":"object","properties":{"path":{"type":"string"},"edits":{"type":"array","items":{"type":"object","properties":{"old_string":{"type":"string"},"new_string":{"type":"string"}},"required":["old_string","new_string"]}}},"required":["path","edits"]}}}
 ]"#;
-const SYSTEM_PROMPT:&str="You are Amni-Code,an expert AI coding agent.Your working dir is:{CWD}\n\nCRITICAL:chain actions,NEVER stop after 1 tool,explore w/tools first,read key files before edits,verify after changes,concise,base paths on cwd,fix errors+retry.\n\nTools:read_file,write_file,edit_file,run_command,list_directory,search_files,web_fetch,web_search,memory_read,memory_write,git_status,git_diff,git_add,git_commit,git_log,run_tests,run_lint\n\nVerify:after editing code,call run_tests (and run_lint for code quality) and fix failures before reporting done (write->test->fix->retest until green;never claim success on a red suite).\n\nGit:prefer the first-class git_* tools over raw run_command for version control;after a meaningful set of edits offer to git_add+git_commit with a clear message;use git_status/git_diff to review before committing.\n\nSupport /interrupt (stop gen) & steering (append mid-gen context).\n\n{CUSTOM_INSTRUCTIONS}";
+const SYSTEM_PROMPT:&str="You are Amni-Code,an expert AI coding agent.Your working dir is:{CWD}\n\nCRITICAL:chain actions,NEVER stop after 1 tool,explore w/tools first,read key files before edits,verify after changes,concise,base paths on cwd,fix errors+retry.\n\nTools:read_file,write_file,edit_file,multi_edit,run_command,list_directory,search_files,web_fetch,web_search,memory_read,memory_write,git_status,git_diff,git_add,git_commit,git_log,run_tests,run_lint\n\nVerify:after editing code,call run_tests (and run_lint for code quality) and fix failures before reporting done (write->test->fix->retest until green;never claim success on a red suite).\n\nGit:prefer the first-class git_* tools over raw run_command for version control;after a meaningful set of edits offer to git_add+git_commit with a clear message;use git_status/git_diff to review before committing.\n\nSupport /interrupt (stop gen) & steering (append mid-gen context).\n\n{CUSTOM_INSTRUCTIONS}";
 #[derive(Deserialize)]struct ChatReq{message:String,session_id:Option<String>,working_dir:Option<String>}
 #[derive(Serialize)]
 struct ChatRes {
@@ -433,6 +434,26 @@ async fn exec_tool(name: &str, args: &serde_json::Value, cwd: &PathBuf) -> (Stri
                 }
             }
         }
+        "multi_edit" => {
+            let full = resolve(args["path"].as_str().unwrap_or(""));
+            let edits: Vec<(String, String)> = args["edits"].as_array().map(|a| a.iter().filter_map(|e| {
+                Some((e.get("old_string")?.as_str()?.to_string(), e.get("new_string")?.as_str()?.to_string()))
+            }).collect()).unwrap_or_default();
+            if edits.is_empty() {
+                ("Error: multi_edit requires a non-empty 'edits' array of {old_string,new_string}".into(), "error".into())
+            } else {
+                match tokio::fs::read_to_string(&full).await {
+                    Ok(c) => match apply_multi_edit(&c, &edits) {
+                        Ok(updated) => match tokio::fs::write(&full, updated).await {
+                            Ok(_) => (format!("Applied {} edits to {}", edits.len(), full.display()), "success".into()),
+                            Err(e) => (format!("Error: {}", e), "error".into()),
+                        },
+                        Err(i) => (format!("Error: edit #{} old_string not found - nothing written (multi_edit is all-or-nothing)", i + 1), "error".into()),
+                    },
+                    Err(e) => (format!("Error: {}", e), "error".into()),
+                }
+            }
+        }
         _ => (format!("Unknown tool: {}", name), "error".into()),
     }
 }
@@ -463,7 +484,17 @@ async fn git_run(cwd: &PathBuf, gitargs: &[&str]) -> (String, String) {
     }
 }
 fn is_mutating_tool(name: &str) -> bool {
-    matches!(name, "write_file" | "edit_file" | "run_command" | "git_add" | "git_commit" | "memory_write")
+    matches!(name, "write_file" | "edit_file" | "multi_edit" | "run_command" | "git_add" | "git_commit" | "memory_write")
+}
+fn apply_multi_edit(content: &str, edits: &[(String, String)]) -> Result<String, usize> {
+    let mut out = content.to_string();
+    for (i, (old, new)) in edits.iter().enumerate() {
+        if old.is_empty() || !out.contains(old.as_str()) {
+            return Err(i);
+        }
+        out = out.replacen(old.as_str(), new.as_str(), 1);
+    }
+    Ok(out)
 }
 fn detect_test_command(cwd: &PathBuf) -> Option<&'static str> {
     if cwd.join("Cargo.toml").exists() {
@@ -954,7 +985,7 @@ let max_iters=std::env::var("AMNI_CODE_MAX_ITERS").ok().and_then(|v|v.parse::<u3
                         )
                         .await;
                     // Backup before file operations
-                    if tc.name == "write_file" || tc.name == "edit_file" {
+                    if tc.name == "write_file" || tc.name == "edit_file" || tc.name == "multi_edit" {
                         if let Some(path) = tc.args["path"].as_str() {
                             let full_path = if PathBuf::from(path).is_absolute() {
                                 PathBuf::from(path)
@@ -2522,5 +2553,16 @@ mod git_tool_tests {
         assert_eq!(std::fs::read_to_string(&f1).unwrap(), "original-a", "a.txt restored to snapshot");
         assert!(!std::path::Path::new(&f2).exists(), "b.txt deleted (was absent at snapshot)");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+    #[test]
+    fn multi_edit_atomic() {
+        let content = "let a = 1;\nlet b = 2;\nlet c = 3;";
+        let edits = vec![("a = 1".to_string(), "a = 10".to_string()), ("c = 3".to_string(), "c = 30".to_string())];
+        assert_eq!(apply_multi_edit(content, &edits), Ok("let a = 10;\nlet b = 2;\nlet c = 30;".to_string()));
+        let bad = vec![("a = 1".to_string(), "a = 10".to_string()), ("NOPE".to_string(), "x".to_string())];
+        assert_eq!(apply_multi_edit(content, &bad), Err(1), "missing old_string -> all-or-nothing Err at that index");
+        assert_eq!(apply_multi_edit(content, &[("".to_string(), "x".to_string())]), Err(0), "empty old_string rejected");
+        let seq = vec![("a = 1".to_string(), "a = 1; let d = 4".to_string()), ("d = 4".to_string(), "d = 40".to_string())];
+        assert_eq!(apply_multi_edit(content, &seq), Ok("let a = 1; let d = 40;\nlet b = 2;\nlet c = 3;".to_string()), "edits apply sequentially");
     }
 }

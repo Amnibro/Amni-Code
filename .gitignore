@@ -9,3 +9,6 @@ backups/
 docs/checklists/
 docs/guardian_councils/
 __pycache__/
+
+# nested Rust build output (root-anchored /target/ above does not cover this)
+installer/target/

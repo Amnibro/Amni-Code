@@ -1,9 +1,0 @@
-C:\Users\antho\Documents\ai\Amni-Code\installer\target\debug\deps\unicode_segmentation-0ebb2197cbb303af.d: C:\Users\antho\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\unicode-segmentation-1.13.2\src\lib.rs C:\Users\antho\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\unicode-segmentation-1.13.2\src\grapheme.rs C:\Users\antho\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\unicode-segmentation-1.13.2\src\sentence.rs C:\Users\antho\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\unicode-segmentation-1.13.2\src\word.rs C:\Users\antho\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\unicode-segmentation-1.13.2\src\tables.rs
-
-C:\Users\antho\Documents\ai\Amni-Code\installer\target\debug\deps\libunicode_segmentation-0ebb2197cbb303af.rmeta: C:\Users\antho\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\unicode-segmentation-1.13.2\src\lib.rs C:\Users\antho\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\unicode-segmentation-1.13.2\src\grapheme.rs C:\Users\antho\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\unicode-segmentation-1.13.2\src\sentence.rs C:\Users\antho\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\unicode-segmentation-1.13.2\src\word.rs C:\Users\antho\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\unicode-segmentation-1.13.2\src\tables.rs
-
-C:\Users\antho\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\unicode-segmentation-1.13.2\src\lib.rs:
-C:\Users\antho\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\unicode-segmentation-1.13.2\src\grapheme.rs:
-C:\Users\antho\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\unicode-segmentation-1.13.2\src\sentence.rs:
-C:\Users\antho\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\unicode-segmentation-1.13.2\src\word.rs:
-C:\Users\antho\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\unicode-segmentation-1.13.2\src\tables.rs:

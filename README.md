@@ -8,7 +8,7 @@
     <a href="https://ko-fi.com/anmire"><img src="https://img.shields.io/badge/Ko--fi-Support%20the%20project-FF5E5B?logo=ko-fi&logoColor=white" alt="Ko-fi"></a>
     <a href="https://github.com/anmire/Amni-Code/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License"></a>
     <img src="https://img.shields.io/badge/built%20with-Rust-orange?logo=rust" alt="Rust">
-    <img src="https://img.shields.io/badge/version-2.8.0-e91e63" alt="Version">
+    <img src="https://img.shields.io/badge/version-2.9.0-e91e63" alt="Version">
   </p>
 </p>
 
@@ -35,7 +35,9 @@ Amni-Code is a **self-hosted AI coding agent** with a full embedded IDE. Give an
 | 📎 **@-File Mentions** | Type `@path/to/file` to drop its contents straight into context |
 | ⏪ **Session Checkpoints** | Snapshot + restore a whole session — conversation *and* files |
 | ✂️ **Atomic Multi-Edit** | Apply many find/replace edits to one file all-or-nothing |
-| 🧠 **Any LLM Provider** | xAI Grok, OpenAI, Anthropic, Ollama, or any OpenAI-compatible endpoint |
+| 🧠 **Any LLM Provider** | Adam (local), xAI Grok, OpenAI, Anthropic, Google, Ollama, or any OpenAI-compatible endpoint |
+| 🎫 **Your subscriptions, no API key** | Claude Code, Codex CLI (ChatGPT), GitHub Copilot CLI, Cursor CLI, Grok CLI, Antigravity, OpenCode — pick one in Settings, sign in once in that CLI, and it drives your project folder directly |
+| 📝 **Rich answers** | Headings, tables, nested lists, task lists, blockquotes, and fenced code with language bar, copy button, and syntax highlight, set in the amni-scient.com type (Archivo, Source Serif 4, Cascadia Code) |
 | 📦 **Single Binary** | One Rust binary. No runtime deps. Just `cargo build` and go |
 | 🎨 **Full IDE** | Monaco editor with multi-file tabs, breadcrumbs, syntax highlighting for 30+ languages |
 | 🎯 **Command Palette** | `Ctrl+Shift+P` — fuzzy search 16 commands, VS Code-style |
@@ -124,7 +126,7 @@ amni
 │  │         │ │          │ │  + Tabs  │ │          │  │
 │  └─────────┘ └──────────┘ └──────────┘ └──────────┘  │
 │  ┌──────────────────────────────────────────────────┐│
-│  │  Status Bar │ Language │ Ln/Col │ v2.2.0         ││
+│  │  Status Bar │ Language │ Ln/Col │ v2.8.4         ││
 │  └──────────────────────────────────────────────────┘│
 └───────────────────────┬──────────────────────────────┘
                         │ SSE streaming
@@ -151,7 +153,7 @@ Click **⚙ Settings** in the UI:
 
 | Setting | Description |
 |---------|-------------|
-| **Provider** | xAI, OpenAI, Anthropic, Ollama, or custom endpoint |
+| **Provider** | Adam, xAI, OpenAI, Anthropic, Google, Ollama, custom endpoint, or a subscription CLI (Claude Code, Codex, Copilot, Cursor, Grok, Antigravity, OpenCode) |
 | **Model** | Auto-populated from provider |
 | **API Key** | Auto-detected from `.env` or env vars |
 | **Working Directory** | Where the agent operates |

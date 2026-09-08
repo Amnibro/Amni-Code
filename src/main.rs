@@ -1,4 +1,5 @@
-use axum::{extract::{Query,State},response::{sse::{Event as SseEvent,KeepAlive,Sse},Html,Json},routing::{get,post},Router};use futures::StreamExt;use serde::{Deserialize,Serialize};use std::{collections::HashMap,convert::Infallible,path::{Path,PathBuf},process::Stdio,sync::{Arc,atomic::AtomicBool}};use tokio::sync::{Mutex,broadcast};use tokio_stream::wrappers::ReceiverStream;use tower_http::cors::CorsLayer;
+mod cli_seats;
+use axum::{extract::{Query,State},http::{header,HeaderValue,StatusCode},response::{sse::{Event as SseEvent,KeepAlive,Sse},Html,IntoResponse,Json,Response},routing::{get,post},Router};use futures::StreamExt;use serde::{Deserialize,Serialize};use std::{collections::HashMap,convert::Infallible,path::{Path,PathBuf},process::Stdio,sync::{Arc,atomic::AtomicBool}};use tokio::sync::{Mutex,broadcast};use tokio_stream::wrappers::ReceiverStream;use tower_http::cors::CorsLayer;
 #[derive(Clone, Default, Serialize)]
 struct DownloadProgress {
     repo: String,
@@ -69,6 +70,7 @@ impl Default for Config {
             Some("openrouter") => ("openrouter", openrouter_key),
             Some("ollama") => ("ollama", String::new()),
             Some("local") => ("local", String::new()),
+            Some(p) if cli_seats::is_seat(p) => (p, String::new()),
             _ => ("amni", String::new()),
         };
         let (model, base_url) = match provider {
@@ -113,6 +115,7 @@ impl Default for Config {
                 "anthropic/claude-sonnet-4".to_string(),
                 "https://openrouter.ai".to_string(),
             ),
+            p if cli_seats::is_seat(p) => ("default".to_string(), String::new()),
             "amni" => ("adam:granite-gf17".to_string(), "http://127.0.0.1:7700".to_string()),
             "ollama" => (String::new(), "http://localhost:11434".to_string()),
             "local" => (String::new(), "http://localhost:11434".to_string()),
@@ -196,7 +199,7 @@ const TOOLS_JSON: &str = r#"[
   {"type":"function","function":{"name":"run_format","description":"Auto-format the code (auto-detects cargo fmt/gofmt/ruff format/prettier from the working dir; pass 'command' to override). Run after edits, before run_lint and run_tests.","parameters":{"type":"object","properties":{"command":{"type":"string","description":"Optional explicit format command instead of auto-detect"}}}}},
   {"type":"function","function":{"name":"find_definition","description":"Find where a symbol is DEFINED across the codebase (fn/func/def/function/class/struct/enum/trait/interface/type/const/impl/mod NAME). Returns file:line matches. Faster + more precise than search_files for go-to-definition.","parameters":{"type":"object","properties":{"name":{"type":"string","description":"Symbol name to find the definition of"},"path":{"type":"string","description":"Optional dir to search (default '.')"}},"required":["name"]}}}
 ]"#;
-const SYSTEM_PROMPT:&str="You are Amni-Code,an expert AI coding agent.Your working dir is:{CWD}\n\nCRITICAL:chain actions,NEVER stop after 1 tool,explore w/tools first,read key files before edits,verify after changes,concise,base paths on cwd,fix errors+retry.\n\nTools:read_file,write_file,edit_file,multi_edit,run_command,list_directory,search_files,web_fetch,web_search,memory_read,memory_write,git_status,git_diff,git_add,git_commit,git_log,run_tests,run_lint,run_format,find_definition\n\nVerify:after editing code,run_format then run_lint then run_tests,and fix failures before reporting done (write->format->lint->test->fix until green;never claim success on a red suite).\n\nGit:prefer the first-class git_* tools over raw run_command for version control;after a meaningful set of edits offer to git_add+git_commit with a clear message;use git_status/git_diff to review before committing.\n\nSupport /interrupt (stop gen) & steering (append mid-gen context).\n\n{CUSTOM_INSTRUCTIONS}";
+const SYSTEM_PROMPT:&str="You are Amni-Code,a Rust/Axum coding agent.Your working dir is:{CWD}\n\nYou are NOT Adam's GF(17) model.Do not describe TMU,Reffelt,GF(17),PTEX,or Asimov laws unless those exact terms appear in files you listed or in the workspace snapshot.\n\nCRITICAL:chain actions,NEVER stop after 1 tool,explore w/tools first,read key files before edits,verify after changes,concise,base paths on cwd,fix errors+retry.For 'explain this codebase',use the workspace snapshot and listed files only — do not invent architecture.\n\nTools:read_file,write_file,edit_file,multi_edit,run_command,list_directory,search_files,web_fetch,web_search,memory_read,memory_write,git_status,git_diff,git_add,git_commit,git_log,run_tests,run_lint,run_format,find_definition\n\nVerify:after editing code,run_format then run_lint then run_tests,and fix failures before reporting done (write->format->lint->test->fix until green;never claim success on a red suite).\n\nGit:prefer the first-class git_* tools over raw run_command for version control;after a meaningful set of edits offer to git_add+git_commit with a clear message;use git_status/git_diff to review before committing.\n\nSupport /interrupt (stop gen) & steering (append mid-gen context).\n\n{CUSTOM_INSTRUCTIONS}";
 #[derive(Deserialize)]struct ChatReq{message:String,session_id:Option<String>,working_dir:Option<String>}
 #[derive(Serialize)]
 struct ChatRes {
@@ -709,7 +712,7 @@ async fn mcp_connect(cfg: &McpServerCfg) -> Result<McpServer, String> {
     let mut stdin = child.stdin.take().ok_or("no stdin")?;
     let stdout = child.stdout.take().ok_or("no stdout")?;
     let mut reader = tokio::io::BufReader::new(stdout);
-    mcp_send(&mut stdin, &mcp_rpc(1, "initialize", serde_json::json!({"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"amni-code","version":"2.8.0"}}))).await?;
+    mcp_send(&mut stdin, &mcp_rpc(1, "initialize", serde_json::json!({"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"amni-code","version":env!("CARGO_PKG_VERSION")}}))).await?;
     let _ = mcp_read_response(&mut reader, 1).await?;
     mcp_send(&mut stdin, &serde_json::json!({"jsonrpc":"2.0","method":"notifications/initialized"}).to_string()).await?;
     mcp_send(&mut stdin, &mcp_rpc(2, "tools/list", serde_json::json!({}))).await?;
@@ -916,6 +919,43 @@ fn load_custom_instructions(cwd: &Path) -> String {
         }
     }
     if instructions.is_empty() { String::new() } else { format!("PROJECT INSTRUCTIONS:\n{}", instructions.join("\n\n")) }
+}
+fn is_codebase_explain(msg:&str)->bool{
+    let m=msg.to_ascii_lowercase();
+    let ask=m.contains("explain")||m.contains("how does")||m.contains("how this")||m.contains("how the")||m.contains("how do");
+    let target=m.contains("codebase")||m.contains("code base")||m.contains("this repo")||m.contains("this project")||m.contains("this folder")||m.contains("this directory")||m.contains("the codebase")||m.contains("the repo");
+    ask&&target
+}
+fn should_snap_to_code_repo(saved:&str,code_root:&Path)->bool{
+    if saved.is_empty(){return true;}
+    let saved=Path::new(saved);
+    if saved==code_root{return false;}
+    code_root.starts_with(saved)&&saved.join("Amni-Ai").is_dir()&&saved.join("Amni-Code").is_dir()
+}
+async fn seed_codebase_snapshot(cwd:&Path)->String{
+    let mut out=String::from("[workspace snapshot — answer from these files only]\n");
+    if let Ok(mut rd)=tokio::fs::read_dir(cwd).await{
+        let mut names=Vec::new();
+        while let Ok(Some(e))=rd.next_entry().await{
+            let n=e.file_name().to_string_lossy().to_string();
+            if n.starts_with('.')||n=="target"||n=="node_modules"||n=="__pycache__"||n=="archive"||n=="backups"{continue;}
+            let dir=e.file_type().await.map(|t|t.is_dir()).unwrap_or(false);
+            names.push(if dir{format!("{n}/")}else{n});
+        }
+        names.sort();
+        names.truncate(80);
+        out.push_str("Top-level:\n");
+        out.push_str(&names.join("\n"));
+        out.push('\n');
+    }
+    for name in ["README.md","architecture_map.md","Cargo.toml","package.json","src/main.rs"]{
+        let p=cwd.join(name);
+        if let Ok(s)=tokio::fs::read_to_string(&p).await{
+            let take:String=s.chars().take(5000).collect();
+            out.push_str(&format!("\n--- {name} ---\n{take}\n"));
+        }
+    }
+    out
 }
 struct ToolCall {
     id: String,
@@ -1199,9 +1239,9 @@ async fn resolve_mentions(user_msg: &str, cwd: &PathBuf) -> Option<String> {
     }
     if added == 0 { None } else { Some(format!("{}{}", ctx, user_msg)) }
 }
-async fn agent_loop_stream(app:App,sid:String,mut user_msg:String,wd:Option<String>,tx:tokio::sync::mpsc::Sender<SseEvent>){match handle_slash(&app,&sid,&user_msg,&wd,&tx).await{SlashOutcome::Handled=>return,SlashOutcome::Rewrite(p)=>user_msg=p,SlashOutcome::NotSlash=>{}}{let __mcwd=session_cwd(&app,&sid,&wd).await;if let Some(__ex)=resolve_mentions(&user_msg,&__mcwd).await{user_msg=__ex;}}let config=app.config.lock().await.clone();ensure_model_loaded(&config).await;let cwd=app.cwd.lock().await.clone();let cwd_path=if let Some(s)=app.sessions.lock().await.get(&sid){if!s.working_dir.is_empty(){PathBuf::from(&s.working_dir)}else{cwd.clone()}}else{wd.as_ref().map_or(cwd.clone(),|w|PathBuf::from(w))};{let mut sessions=app.sessions.lock().await;let session=sessions.entry(sid.clone()).or_default();if session.messages.is_empty(){let custom=load_custom_instructions(&cwd_path);let sys=SYSTEM_PROMPT.replace("{CWD}",&cwd_path.display().to_string()).replace("{CUSTOM_INSTRUCTIONS}",&custom);session.messages.push(serde_json::json!({"role":"system","content":sys}));if let Some(w)=wd{session.working_dir=w.clone();}}session.messages.push(serde_json::json!({"role":"user","content":&user_msg}));compact_context(&mut session.messages);}let interrupt_flag={let mut interrupts=app.interrupts.lock().await;let flag=interrupts.entry(sid.clone()).or_insert_with(||Arc::new(AtomicBool::new(false))).clone();flag.store(false,std::sync::atomic::Ordering::Relaxed);flag};
+async fn agent_loop_stream(app:App,sid:String,mut user_msg:String,wd:Option<String>,tx:tokio::sync::mpsc::Sender<SseEvent>){match handle_slash(&app,&sid,&user_msg,&wd,&tx).await{SlashOutcome::Handled=>return,SlashOutcome::Rewrite(p)=>user_msg=p,SlashOutcome::NotSlash=>{}}{let __mcwd=session_cwd(&app,&sid,&wd).await;if let Some(__ex)=resolve_mentions(&user_msg,&__mcwd).await{user_msg=__ex;}}let config=app.config.lock().await.clone();ensure_model_loaded(&config).await;let cwd=app.cwd.lock().await.clone();let cwd_path=if let Some(s)=app.sessions.lock().await.get(&sid){if!s.working_dir.is_empty(){PathBuf::from(&s.working_dir)}else{cwd.clone()}}else{wd.as_ref().map_or(cwd.clone(),|w|PathBuf::from(w))};if is_codebase_explain(&user_msg){let snap=seed_codebase_snapshot(&cwd_path).await;if snap.len()>40{user_msg=format!("{user_msg}\n\n{snap}");}}{let mut sessions=app.sessions.lock().await;let session=sessions.entry(sid.clone()).or_default();if session.messages.is_empty(){let custom=load_custom_instructions(&cwd_path);let sys=SYSTEM_PROMPT.replace("{CWD}",&cwd_path.display().to_string()).replace("{CUSTOM_INSTRUCTIONS}",&custom);session.messages.push(serde_json::json!({"role":"system","content":sys}));if let Some(w)=wd{session.working_dir=w.clone();}}session.messages.push(serde_json::json!({"role":"user","content":&user_msg}));compact_context(&mut session.messages);}let interrupt_flag={let mut interrupts=app.interrupts.lock().await;let flag=interrupts.entry(sid.clone()).or_insert_with(||Arc::new(AtomicBool::new(false))).clone();flag.store(false,std::sync::atomic::Ordering::Relaxed);flag};
 let _=tx.send(SseEvent::default().event("session").data(serde_json::json!({"session_id":&sid}).to_string())).await;
-let max_iters=std::env::var("AMNI_CODE_MAX_ITERS").ok().and_then(|v|v.parse::<u32>().ok()).unwrap_or(100);let mut it:u32=0;while it<max_iters{if interrupt_flag.load(std::sync::atomic::Ordering::Relaxed){let _=tx.send(SseEvent::default().event("interrupted").data(serde_json::json!({"session_id":&sid}).to_string())).await;return;}it+=1;let messages=app.sessions.lock().await.entry(sid.clone()).or_default().messages.clone();match llm_call(&config,&messages).await{Ok((raw_msg,tool_calls))=>{if let Some(widgets)=raw_msg.get("amni_widgets").and_then(|w|w.as_array()){for w in widgets{let _=tx.send(SseEvent::default().event("widget").data(w.to_string())).await;}}if tool_calls.is_empty(){let content=raw_msg["content"].as_str().unwrap_or("").to_string();app.sessions.lock().await.entry(sid.clone()).or_default().messages.push(raw_msg);let _=tx.send(SseEvent::default().event("message").data(serde_json::json!({"message":&content}).to_string())).await;let _=tx.send(SseEvent::default().event("done").data(serde_json::json!({"session_id":&sid}).to_string())).await;return;}
+if let Some(seat)=cli_seats::seat(&config.provider){let hist=app.sessions.lock().await.get(&sid).map(|s|s.messages.clone()).unwrap_or_default();let body=if seat.id=="claude-code"&&cli_seats::has_pin(&sid){user_msg.clone()}else{cli_seats::transcript_prefix(&hist,&user_msg)};match cli_seats::run(seat,&config.model,&config.mode,config.auto_approve,&cwd_path,&body,&sid,interrupt_flag.clone(),tx.clone()).await{Ok(text)=>{app.sessions.lock().await.entry(sid.clone()).or_default().messages.push(serde_json::json!({"role":"assistant","content":&text}));let _=tx.send(SseEvent::default().event("message").data(serde_json::json!({"message":&text}).to_string())).await;let _=tx.send(SseEvent::default().event("done").data(serde_json::json!({"session_id":&sid}).to_string())).await;}Err(e)=>{if e=="interrupted"{let _=tx.send(SseEvent::default().event("interrupted").data(serde_json::json!({"session_id":&sid}).to_string())).await;}else{let _=tx.send(SseEvent::default().event("error").data(serde_json::json!({"error":&e}).to_string())).await;}}}return;}let max_iters=std::env::var("AMNI_CODE_MAX_ITERS").ok().and_then(|v|v.parse::<u32>().ok()).unwrap_or(100);let mut it:u32=0;while it<max_iters{if interrupt_flag.load(std::sync::atomic::Ordering::Relaxed){let _=tx.send(SseEvent::default().event("interrupted").data(serde_json::json!({"session_id":&sid}).to_string())).await;return;}it+=1;let messages=app.sessions.lock().await.entry(sid.clone()).or_default().messages.clone();match llm_call(&config,&messages).await{Ok((raw_msg,tool_calls))=>{if let Some(widgets)=raw_msg.get("amni_widgets").and_then(|w|w.as_array()){for w in widgets{let _=tx.send(SseEvent::default().event("widget").data(w.to_string())).await;}}if tool_calls.is_empty(){let content=raw_msg["content"].as_str().unwrap_or("").to_string();app.sessions.lock().await.entry(sid.clone()).or_default().messages.push(raw_msg);let _=tx.send(SseEvent::default().event("message").data(serde_json::json!({"message":&content}).to_string())).await;let _=tx.send(SseEvent::default().event("done").data(serde_json::json!({"session_id":&sid}).to_string())).await;return;}
                 app.sessions
                     .lock()
                     .await
@@ -1678,8 +1718,10 @@ async fn handle_server_log(State(app): State<App>) -> Sse<impl futures::Stream<I
     });
     Sse::new(ReceiverStream::new(rx).map(|e| Ok::<_, Infallible>(e))).keep_alive(KeepAlive::default())
 }
+async fn handle_seats() -> Json<serde_json::Value> { Json(cli_seats::status_json()) }
 async fn handle_models(State(app): State<App>) -> Json<ModelsRes> {
     let cfg = app.config.lock().await.clone();
+    if let Some(s) = cli_seats::seat(&cfg.provider) { return Json(ModelsRes { models: s.models.iter().map(|m| m.to_string()).collect() }); }
     let base = cfg.base_url.trim_end_matches('/').to_string();
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(5))
@@ -2464,8 +2506,8 @@ async fn handle_hf_download(
 async fn handle_hf_progress(State(app): State<App>) -> Json<DownloadProgress> {
     Json(app.dl_progress.lock().await.clone())
 }
-async fn handle_health() -> &'static str {
-    "ok"
+async fn handle_health() -> impl IntoResponse {
+    Json(serde_json::json!({"ok":true,"status":"ok","version":env!("CARGO_PKG_VERSION"),"port":std::env::var("AMNI_CODE_PORT").ok().and_then(|s|s.parse::<u16>().ok()).unwrap_or(3030)}))
 }
 async fn handle_fs_events(State(app): State<App>) -> Sse<impl futures::Stream<Item = Result<SseEvent, Infallible>> + Send + 'static> {
     let mut rx = app.fs_tx.subscribe();
@@ -2489,6 +2531,18 @@ async fn handle_memory_list(State(app): State<App>) -> Json<serde_json::Value> {
 async fn serve_ui() -> Html<&'static str> {
     Html(include_str!("../static/index.html"))
 }
+fn _asset(body:&'static [u8],ct:&'static str)->Response{
+    let mut r=Response::new(body.to_vec().into());
+    *r.status_mut()=StatusCode::OK;
+    r.headers_mut().insert(header::CONTENT_TYPE,HeaderValue::from_static(ct));
+    r.headers_mut().insert(header::CACHE_CONTROL,HeaderValue::from_static("no-store"));
+    r
+}
+async fn serve_dual_css()->impl IntoResponse{_asset(include_str!("../static/dual-skin.css").as_bytes(),"text/css; charset=utf-8")}
+async fn serve_dual_js()->impl IntoResponse{_asset(include_str!("../static/dual-skin.js").as_bytes(),"application/javascript; charset=utf-8")}
+async fn serve_archivo()->impl IntoResponse{_asset(include_bytes!("../static/fonts/archivo-var.woff2"),"font/woff2")}
+async fn serve_sourceserif()->impl IntoResponse{_asset(include_bytes!("../static/fonts/sourceserif4-var.woff2"),"font/woff2")}
+async fn serve_archivo_ext()->impl IntoResponse{_asset(include_bytes!("../static/fonts/archivo-var-ext.woff2"),"font/woff2")}
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt::init();
@@ -2537,6 +2591,8 @@ async fn main() -> anyhow::Result<()> {
     normalize_config(&mut config);
     if config.base_url != base_before { persist_config(&config); }
     if config.working_dir.is_empty() { config.working_dir = cwd.to_string_lossy().into(); }
+    let code_root=PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    if should_snap_to_code_repo(&config.working_dir,&code_root){config.working_dir=code_root.to_string_lossy().into();persist_config(&config);}
     // CLI arg: first non-flag argument sets working directory
     let cli_dir: Option<String> = std::env::args().skip(1).find(|a| !a.starts_with('-') && std::fs::metadata(a).map(|m| m.is_dir()).unwrap_or(false));
     if let Some(ref d) = cli_dir {
@@ -2545,7 +2601,7 @@ async fn main() -> anyhow::Result<()> {
     }
     let effective_cwd = PathBuf::from(&config.working_dir);
     let custom_inst = load_custom_instructions(&effective_cwd);
-    println!("\n  Amni-Code v2.2.0 — AI Coding Agent");
+    println!("\n  Amni-Code v{} — AI Coding Agent",env!("CARGO_PKG_VERSION"));
     println!("  Working dir: {}", effective_cwd.display());
     if !custom_inst.is_empty() { println!("  Custom instructions: loaded from project"); }
     let memory = load_memory_store(&effective_cwd);
@@ -2592,6 +2648,11 @@ async fn main() -> anyhow::Result<()> {
     });
     let router = Router::new()
         .route("/", get(serve_ui))
+        .route("/assets/dual-skin.css", get(serve_dual_css))
+        .route("/assets/dual-skin.js", get(serve_dual_js))
+        .route("/assets/fonts/archivo-var.woff2", get(serve_archivo))
+        .route("/assets/fonts/archivo-var-ext.woff2", get(serve_archivo_ext))
+        .route("/assets/fonts/sourceserif4-var.woff2", get(serve_sourceserif))
         .route("/api/chat", post(handle_chat))
         .route(
             "/api/config",
@@ -2618,20 +2679,29 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/hf/progress", get(handle_hf_progress))
         .route("/api/fs-events", get(handle_fs_events))
         .route("/api/memory", get(handle_memory_list))
+        .route("/api/seats", get(handle_seats))
         .route("/health", get(handle_health))
         .layer(CorsLayer::permissive())
         .with_state(app);
     let use_browser = std::env::args().any(|a| a == "--browser");
+    let ui_port: u16 = std::env::var("AMNI_CODE_PORT")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(3030);
+    let ui_url = format!("http://localhost:{}", ui_port);
+    let bind_addr = format!("0.0.0.0:{}", ui_port);
     if use_browser {
-        let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await?;
-        println!("  Server: http://localhost:3000");
+        let listener = tokio::net::TcpListener::bind(&bind_addr).await?;
+        println!("  Server: {}", ui_url);
         println!("  Opening browser...\n");
-        let _ = open::that("http://localhost:3000");
+        if std::env::var("AMNI_CODE_NO_OPEN").is_err() { let _ = open::that(&ui_url); }
         axum::serve(listener, router).await?;
     } else {
+        let bind_addr2 = bind_addr.clone();
+        let ui_url2 = ui_url.clone();
         tokio::spawn(async move {
-            let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await.unwrap();
-            println!("  Server: http://localhost:3000\n");
+            let listener = tokio::net::TcpListener::bind(&bind_addr2).await.unwrap();
+            println!("  Server: {}\n", ui_url2);
             axum::serve(listener, router).await.unwrap();
         });
         tokio::time::sleep(std::time::Duration::from_millis(300)).await;
@@ -2646,7 +2716,7 @@ async fn main() -> anyhow::Result<()> {
             .build(&event_loop)
             .unwrap();
         let _webview = WebViewBuilder::new()
-            .with_url("http://localhost:3000")
+            .with_url(&ui_url)
             .with_devtools(true)
             .build(&window)
             .unwrap();
@@ -2765,6 +2835,27 @@ mod git_tool_tests {
     #[test]
     fn mention_extraction() {
         assert_eq!(extract_mentions("explain @src/main.rs please"), vec!["src/main.rs"]);
+    }
+    #[test]
+    fn codebase_explain_detects_welcome_chip(){
+        assert!(is_codebase_explain("Explain how this codebase works"));
+        assert!(is_codebase_explain("how does this repo work?"));
+        assert!(!is_codebase_explain("Create a Python Flask API with user auth"));
+        assert!(!is_codebase_explain("Find and fix the bug in main.py"));
+    }
+    #[test]
+    fn snap_cwd_from_monorepo_parent(){
+        let tmp=std::env::temp_dir().join(format!("amni_snap_{}",std::process::id()));
+        let _=std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(tmp.join("Amni-Ai")).unwrap();
+        std::fs::create_dir_all(tmp.join("Amni-Code")).unwrap();
+        let code=tmp.join("Amni-Code");
+        assert!(should_snap_to_code_repo(tmp.to_str().unwrap(),&code));
+        assert!(!should_snap_to_code_repo(code.to_str().unwrap(),&code));
+        let _=std::fs::remove_dir_all(&tmp);
+    }
+    #[test]
+    fn mention_more(){
         assert_eq!(extract_mentions("@Cargo.toml and @README.md"), vec!["Cargo.toml", "README.md"]);
         assert_eq!(extract_mentions("look at @src/main.rs."), vec!["src/main.rs"]);
         assert_eq!(extract_mentions("@a/b/c.rs"), vec!["a/b/c.rs"]);

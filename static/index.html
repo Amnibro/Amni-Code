@@ -1,9 +1,11 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-skin="braid" data-theme="dark">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Amni-Code</title>
+<link rel="stylesheet" href="/assets/dual-skin.css">
+<script src="/assets/dual-skin.js"></script>
 <style>
 *,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
 :root{--bg:#0a0a0a;--panel:#111;--border:#1a1a1a;--accent:#e91e63;--accent-dim:rgba(233,30,99,0.15);--accent-glow:rgba(233,30,99,0.3);--text:#e0e0e0;--user-text:#111;--dim:#666;--gold:#ffd700;--error:#ff4444;--font:'JetBrains Mono','Fira Code','SF Mono',Consolas,monospace;--surface2:#1a1a1a;--text2:#999;--mono:var(--font)}
@@ -93,7 +95,7 @@ a:hover{opacity:.8}
 .sb-path{font-size:10px;color:var(--dim);padding:4px 6px 6px;word-break:break-all;border-bottom:1px solid var(--border);margin-bottom:4px}
 .editor-header{padding:12px 16px;border-bottom:1px solid var(--border);background:var(--panel);display:flex;align-items:center;justify-content:space-between;flex-shrink:0}
 .editor-body{flex:1;overflow:hidden;position:relative}
-.header{display:flex;align-items:center;padding:12px 20px;border-bottom:1px solid var(--border);background:var(--panel);flex-shrink:0;gap:12px;backdrop-filter:blur(12px)}.cwd-info{font-size:12px;color:var(--dim);display:flex;align-items:center;gap:5px;background:var(--accent-dim);padding:3px 10px;border-radius:999px;border:1px solid var(--border);flex-shrink:0}.header h1{font-size:16px;font-weight:600;letter-spacing:-.3px}.header h1 span{color:var(--accent);font-weight:700}.header-actions{margin-left:auto;display:flex;gap:8px;align-items:center}
+.header{display:flex;align-items:center;padding:12px 20px;border-bottom:1px solid var(--border);background:var(--panel);flex-shrink:0;gap:12px;backdrop-filter:blur(12px)}.cwd-info{font-size:12px;color:var(--dim);display:flex;align-items:center;gap:5px;background:var(--accent-dim);padding:3px 10px;border-radius:999px;border:1px solid var(--border);flex-shrink:0}.header h1{font-size:16px;font-weight:600;letter-spacing:-.3px}.header h1 span{color:var(--accent);font-weight:700}.header-actions{margin-left:auto;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
 .icon-btn{background:none;border:1px solid var(--border);color:var(--dim);width:34px;height:34px;border-radius:8px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all .15s}
 .icon-btn:hover{border-color:var(--accent);color:var(--accent)}
 .icon-btn.active{background:var(--accent);border-color:var(--accent);color:#fff}
@@ -103,6 +105,45 @@ a:hover{opacity:.8}
 .msg{max-width:85%;padding:14px 18px;border-radius:14px;line-height:1.6;font-size:14px;word-wrap:break-word}
 .msg.user{align-self:flex-end;background:var(--accent);color:var(--user-text);border-bottom-right-radius:4px}
 .msg.assistant{align-self:flex-start;background:var(--panel);border-bottom-left-radius:4px;border:1px solid var(--border)}
+.msg.assistant h1,.msg.assistant h2,.msg.assistant h3,.msg.assistant h4{margin:12px 0 6px;line-height:1.3;color:var(--text)}
+.msg.assistant h1{font-size:1.35em}.msg.assistant h2{font-size:1.2em}.msg.assistant h3{font-size:1.08em}.msg.assistant h4{font-size:1em;color:var(--text2)}
+.msg.assistant p{margin:6px 0}.msg.assistant ul,.msg.assistant ol{margin:6px 0 6px 22px;padding:0}.msg.assistant li{margin:2px 0}.msg.assistant li>ul,.msg.assistant li>ol{margin-top:2px}
+.msg.assistant blockquote{margin:8px 0;padding:6px 12px;border-left:3px solid var(--accent);background:var(--bg);border-radius:0 8px 8px 0;color:var(--text2)}
+.msg.assistant hr{border:0;border-top:1px solid var(--border);margin:12px 0}
+.msg.assistant .tw{overflow-x:auto;margin:8px 0}.msg.assistant table{border-collapse:collapse;font-size:13px;min-width:50%}.msg.assistant th,.msg.assistant td{border:1px solid var(--border);padding:5px 10px;text-align:left;vertical-align:top}.msg.assistant th{background:var(--bg);color:var(--accent);font-weight:600}.msg.assistant tbody tr:nth-child(even) td{background:color-mix(in srgb,var(--bg) 55%,transparent)}
+.msg.assistant .task input{margin-right:6px;accent-color:var(--accent)}
+.msg.assistant .cb{margin:8px 0;border:1px solid var(--border);border-radius:8px;overflow:hidden;background:var(--bg)}.msg.assistant .cb pre{margin:0;border-radius:0;background:transparent}
+.msg.assistant .cb-bar{display:flex;justify-content:space-between;align-items:center;padding:3px 10px;font-size:11px;color:var(--text2);border-bottom:1px solid var(--border);font-family:var(--font)}
+.msg.assistant .cb-copy{background:transparent;border:1px solid var(--border);color:var(--text2);border-radius:6px;padding:1px 8px;font-size:11px;cursor:pointer}.msg.assistant .cb-copy:hover{color:var(--accent);border-color:var(--accent)}
+.msg.assistant code{font-family:var(--font);font-size:12.5px}.msg.assistant p code,.msg.assistant li code,.msg.assistant td code{background:var(--bg);padding:1px 5px;border-radius:5px;border:1px solid var(--border)}
+.hl-kw{color:var(--accent);font-weight:600}.hl-str{color:#7fd39a}.hl-num{color:#f2b36b}.hl-com{color:var(--text2);opacity:.75;font-style:italic}.hl-fn{color:#79b8ff}.hl-op{opacity:.8}
+.msg.assistant img{max-width:100%;border-radius:8px;display:block;margin:6px 0}
+@font-face{font-family:"Source Serif 4";font-style:normal;font-weight:200 900;font-display:swap;src:url(/assets/fonts/sourceserif4-var.woff2) format("woff2")}
+:root{--site-sans:"Archivo","Segoe UI Variable Display","Segoe UI",system-ui,-apple-system,Roboto,sans-serif;--site-serif:"Source Serif 4","Iowan Old Style","Palatino Linotype",Georgia,serif;--site-mono:"Cascadia Code","JetBrains Mono",ui-monospace,Consolas,monospace;--w-cond:80%;--w-mid:90%;--soft:var(--text2,var(--dim))}
+.msg{font-family:var(--site-serif);font-size:15.5px;line-height:1.62;font-variant-numeric:tabular-nums;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility;padding:14px 20px 15px}
+.msg.user{font-family:var(--site-sans);font-weight:500;font-size:14.5px;line-height:1.5}
+.msg.assistant{color:var(--text)}
+.msg.assistant>p:first-child,.msg.assistant>h1:first-child,.msg.assistant>h2:first-child,.msg.assistant>h3:first-child,.msg.assistant>h4:first-child{margin-top:0}.msg.assistant>*:last-child{margin-bottom:0}
+.msg.assistant p{margin:0 0 .72em}
+.msg.assistant h1,.msg.assistant h2{font-family:var(--site-sans);font-weight:700;font-stretch:var(--w-mid);letter-spacing:-.005em;line-height:1.15;text-wrap:balance;color:var(--text);margin:16px 0 7px}
+.msg.assistant h1{font-size:1.42em}.msg.assistant h2{font-size:1.22em}
+.msg.assistant h3,.msg.assistant h4{font-family:var(--site-sans);font-size:.74rem;font-weight:700;font-stretch:var(--w-cond);letter-spacing:.16em;text-transform:uppercase;color:var(--soft);margin:16px 0 6px;line-height:1.3}
+.msg.assistant h4{font-size:.68rem;letter-spacing:.14em}
+.msg.assistant strong{color:var(--text);font-weight:600}.msg.assistant em{font-style:italic}
+.msg.assistant a{color:var(--accent);text-decoration:none;background-image:linear-gradient(var(--accent),var(--accent));background-size:0% 1px;background-position:0 100%;background-repeat:no-repeat;transition:background-size .35s ease}.msg.assistant a:hover{background-size:100% 1px}
+.msg.assistant ul,.msg.assistant ol{margin:0 0 .72em 1.35em;padding:0}.msg.assistant li{margin:3px 0;line-height:1.55}.msg.assistant li::marker{color:var(--soft)}
+.msg.assistant blockquote{font-family:var(--site-serif);font-style:italic;color:var(--soft);border-left:2px solid var(--accent);background:transparent;border-radius:0;padding:2px 0 2px 14px;margin:8px 0 .72em}
+.msg.assistant hr{margin:14px 0}
+.msg.assistant table{font-family:var(--site-serif);font-size:14px;line-height:1.5;width:100%}.msg.assistant th{font-family:var(--site-sans);font-size:.68rem;font-weight:700;font-stretch:var(--w-cond);letter-spacing:.14em;text-transform:uppercase;color:var(--soft);background:var(--bg);padding:7px 10px}.msg.assistant td{padding:6px 10px}
+.msg.assistant code,.msg.assistant pre,.msg.assistant pre code{font-family:var(--site-mono);font-size:13px;line-height:1.5}
+.msg.assistant p code,.msg.assistant li code,.msg.assistant td code{font-size:.86em;padding:1px 5px}
+.msg.assistant .cb{border-left:3px solid color-mix(in srgb,var(--accent) 45%,transparent)}
+.msg.assistant .cb-bar{font-family:var(--site-sans);font-size:.66rem;font-weight:700;font-stretch:var(--w-cond);letter-spacing:.14em;text-transform:uppercase;color:var(--soft);padding:4px 10px}
+.msg.assistant .cb-copy{font-family:var(--site-sans);font-size:.66rem;font-weight:600;font-stretch:var(--w-cond);letter-spacing:.1em;text-transform:uppercase}
+.seat-status{font-family:var(--site-sans)}
+.thinking-text,#thinking span{font-family:var(--site-sans)}
+.seat-status{font-size:12px;margin:4px 0 8px;line-height:1.45}
+.seat-status .dim{color:var(--text2)}.seat-ok{color:#3ddc84}.seat-no{color:#ff9f43}
 .msg.assistant pre{background:var(--bg);padding:12px;border-radius:8px;overflow-x:auto;margin:8px 0;font-family:var(--font);font-size:13px;line-height:1.5}
 .msg.assistant code{font-family:var(--font);font-size:13px;background:var(--bg);padding:2px 6px;border-radius:4px}
 .msg.assistant pre code{background:none;padding:0}
@@ -136,7 +177,7 @@ a:hover{opacity:.8}
 .input-wrap{display:flex;gap:10px;align-items:flex-end;background:var(--bg);border:1px solid var(--border);border-radius:14px;padding:10px 14px;transition:border-color .2s}
 .input-wrap:focus-within{border-color:var(--accent)}
 .input-wrap textarea{flex:1;background:none;border:none;color:var(--text);font-family:var(--font);font-size:14px;resize:none;outline:none;max-height:150px;line-height:1.5}
-.send-btn{background:var(--accent);border:none;color:#fff;width:38px;height:38px;border-radius:10px;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:all .15s}
+.send-btn{background:var(--accent);border:none;color:var(--you-ink,#fff);width:38px;height:38px;border-radius:var(--radius,10px);cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:all .15s}
 .send-btn:hover{background:var(--accent);transform:scale(1.05);opacity:.9}
 .send-btn:disabled{opacity:.4;cursor:default;transform:none}
 .send-btn svg{width:18px;height:18px}
@@ -237,10 +278,78 @@ a:hover{opacity:.8}
 [dir="rtl"] .history-panel.open{right:0;left:auto}
 [dir="rtl"] .msg.user{align-self:flex-start;border-bottom-right-radius:14px;border-bottom-left-radius:4px}
 [dir="rtl"] .msg.assistant{align-self:flex-end;border-bottom-left-radius:14px;border-bottom-right-radius:4px}
+/* v2.9.0 control system: one type, one height, one radius across header, composer, status bar, panels */
+:root{--ctl-h:32px;--ctl-r:var(--radius,8px);--eyebrow:600 .66rem/1 var(--site-sans);--eyebrow-ls:.13em}
+.header{padding:0 18px;height:54px;gap:10px;flex-wrap:nowrap;overflow:hidden}
+.header h1{font:800 .98rem/1 var(--site-sans);font-stretch:112%;letter-spacing:.06em;text-transform:uppercase;white-space:nowrap;margin:0;flex-shrink:0}
+.header h1 .wm{color:var(--accent)}
+.cwd-info{font:500 .72rem/1 var(--site-sans);letter-spacing:.02em;height:28px;padding:0 12px;border-radius:999px;min-width:0;max-width:34vw;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex-shrink:1}
+.cwd-info #cwd-path{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.hdr-links{display:flex;gap:2px;align-items:center;flex-shrink:0}
+.hdr-links a{font:var(--eyebrow);letter-spacing:var(--eyebrow-ls);text-transform:uppercase;color:var(--dim);text-decoration:none;padding:0 8px;height:var(--ctl-h);display:inline-flex;align-items:center;border-radius:var(--ctl-r);transition:color .18s,background .18s}
+.hdr-links a:hover{color:var(--accent);background:var(--accent-dim)}
+.header-actions{gap:6px;flex-wrap:nowrap;flex-shrink:0}
+.header-actions .skin-switch~#theme-toggle{display:none}
+.theme-cycle,.theme-toggle,.skin-btn,.icon-btn,.welcome .key,.settings-panel button,.history-panel button,.pane-close,.cb-copy,.tool-toggle{font:var(--eyebrow);letter-spacing:var(--eyebrow-ls);text-transform:uppercase;font-stretch:var(--w-cond)}
+.theme-cycle,.theme-toggle{height:var(--ctl-h);padding:0 11px;border:1px solid var(--border);border-radius:var(--ctl-r);background:transparent;color:var(--dim);display:inline-flex;align-items:center;white-space:nowrap}
+.theme-cycle:hover,.theme-toggle:hover{border-color:var(--accent);color:var(--accent);background:var(--accent-dim)}
+.skin-switch{height:var(--ctl-h);border-radius:var(--ctl-r);border-color:var(--border)}
+.skin-btn{height:100%;padding:0 11px;background:transparent;border-right-color:var(--border);display:inline-flex;align-items:center}
+.skin-btn:last-child{border-right:0}
+.skin-btn.active,.skin-btn[aria-pressed=true]{background:var(--accent);color:var(--you-ink,#fff)}
+.icon-btn{width:var(--ctl-h);height:var(--ctl-h);border-radius:var(--ctl-r);color:var(--dim);background:transparent}
+.icon-btn svg{width:15px;height:15px}
+.icon-btn:hover{background:var(--accent-dim)}
+.icon-btn.active{background:var(--accent);border-color:var(--accent);color:var(--you-ink,#fff)}
+.input-area{padding:12px 18px 12px}
+.input-wrap{border-radius:calc(var(--ctl-r) + 4px);padding:8px 8px 8px 16px;gap:6px;align-items:flex-end}
+.input-wrap textarea{font-family:var(--site-sans);font-size:14.5px;line-height:1.5;padding:7px 0}
+.interrupt-btn,.steer-btn,.send-btn{width:34px;height:34px;border-radius:var(--ctl-r);font-size:12px;transition:background .18s,color .18s,border-color .18s,opacity .18s;transform:none!important}
+.interrupt-btn,.steer-btn{background:transparent;border:1px solid var(--border);color:var(--dim)}
+.interrupt-btn:hover{background:transparent;border-color:var(--error,#ff5c5c);color:var(--error,#ff5c5c)}
+.steer-btn:hover{background:transparent;border-color:var(--accent);color:var(--accent)}
+.interrupt-btn:disabled,.steer-btn:disabled{opacity:.35;border-color:var(--border);color:var(--dim)}
+.send-btn{background:var(--accent);color:var(--you-ink,#fff)}.send-btn:hover{opacity:.92}.send-btn svg{width:16px;height:16px}
+.status-bar{background:var(--panel);border-top:1px solid var(--border);color:var(--dim);height:26px;padding:0 18px;font:var(--eyebrow);letter-spacing:.1em;text-transform:uppercase}
+.status-bar .status-item{opacity:1;color:var(--dim)}.status-bar .status-item:hover{color:var(--text)}
+.status-bar #sb-branch::before{content:"";display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--accent);margin-right:6px;vertical-align:1px}
+.status-bar #sb-ver{color:var(--accent)}
+.sidebar-header,.editor-header h3,.pane-header>span,.settings-panel label,.history-panel h2,.settings-panel h2,.tab-bar .tab,.breadcrumbs{font:var(--eyebrow);letter-spacing:var(--eyebrow-ls);text-transform:uppercase;font-stretch:var(--w-cond)}
+.sidebar-header{height:44px;display:flex;align-items:center;padding:0 16px;color:var(--dim)}
+.editor-header{height:44px;padding:0 14px}
+.settings-panel h2,.history-panel h2{font-size:.78rem;color:var(--text);margin:0 0 14px}
+.settings-panel label{color:var(--dim);margin:14px 0 6px}
+.settings-panel input,.settings-panel select{height:36px;padding:0 12px;border-radius:var(--ctl-r);font-family:var(--site-sans);font-size:13.5px}
+.settings-panel select{padding-right:28px}
+.tab-bar .tab{height:34px;padding:0 12px;font-size:.62rem}
+.breadcrumbs{height:28px;padding:0 14px;font-size:.6rem;letter-spacing:.08em}
+.welcome h2{font:700 1.3rem/1.15 var(--site-sans);font-stretch:var(--w-mid);letter-spacing:-.005em}
+.welcome p{font-family:var(--site-serif);font-size:15px}
+.welcome .key{height:var(--ctl-h);padding:0 14px;border-radius:var(--ctl-r);display:inline-flex;align-items:center;color:var(--dim);background:transparent}
+.welcome .key:hover{background:var(--accent-dim)}
+.tool-badge{font:500 .68rem/1 var(--site-sans);letter-spacing:.04em;height:24px;padding:0 9px;border-radius:calc(var(--ctl-r) - 2px)}
+.tool-toggle{color:var(--dim);letter-spacing:.1em;padding:4px 0}.tool-toggle:hover{color:var(--accent)}
+.cmd-palette,.qo-palette{border-radius:calc(var(--ctl-r) + 4px)}
+.cmd-palette input,.qo-palette input{font-family:var(--site-sans);font-size:15px}
+.qo-item,.cmd-item{font-family:var(--site-sans);font-size:13px}
+.toast{border-radius:var(--ctl-r);font-family:var(--site-sans);font-size:12.5px}
+.pane-header{height:34px;padding:0 10px}
+.pane-header select{font-family:var(--site-sans);height:24px;border-radius:calc(var(--ctl-r) - 2px)}
+.pane-close{height:24px;padding:0 8px;border-radius:calc(var(--ctl-r) - 2px)}
+@media(max-width:1180px){.hdr-links{display:none}}
+@media(max-width:980px){.header h1{font-size:.86rem}.cwd-info{display:none}}
+.settings-panel,.history-panel,.sidebar,.cmd-palette,.qo-palette,.toast{font-family:var(--site-sans)}
+.settings-panel select,.pane-header select{appearance:none;-webkit-appearance:none;background-color:var(--sunk,var(--bg));color:var(--text);background-image:linear-gradient(45deg,transparent 50%,var(--dim) 50%),linear-gradient(135deg,var(--dim) 50%,transparent 50%);background-position:calc(100% - 16px) 50%,calc(100% - 11px) 50%;background-size:5px 5px,5px 5px;background-repeat:no-repeat}
+.settings-panel input{background-color:var(--sunk,var(--bg));color:var(--text)}
+.settings-panel p,.settings-panel .toggle-desc{font-family:var(--site-serif);font-size:13px;line-height:1.55;color:var(--dim)}
+.settings-panel button:not(.icon-btn){height:30px;padding:0 12px;border:1px solid var(--border);border-radius:var(--ctl-r);background:transparent;color:var(--dim);cursor:pointer}
+.settings-panel button:not(.icon-btn):hover{border-color:var(--accent);color:var(--accent);background:var(--accent-dim)}
+.settings-panel #dir-tree,.settings-panel #dir-tree *{font-family:var(--site-sans);font-size:13px}
+body{display:flex;flex-direction:column}body>.app{flex:1;min-height:0;height:auto}
 </style>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.44.0/min/vs/loader.min.js"></script>
 <script>
-const I18N={en:{explorer:"Explorer",welcome_title:"Welcome to Amni-Code",welcome_desc:"Your AI coding agent. Type anything below — ask it to build features, fix bugs, create files, run commands, or explain code. It will do the work for you.",welcome_hint:"Click ⚙ to configure your AI provider (Adam / Amni-AI local by default)",prompt_api:"Build an API",prompt_debug:"Debug code",prompt_explain:"Explain code",prompt_scaffold:"Scaffold project",settings:"Settings",provider:"Provider",model:"Model",api_key:"API Key",base_url:"Base URL",working_dir:"Working Directory",auto_approve:"Auto-approve all agent actions",auto_approve_desc:"When off, you'll see what the agent wants to do before it executes. When on, it acts autonomously.",code_changes:"Code Changes",undo:"Undo",accept:"Accept",recent_chats:"Recent Chats",clear_all:"Clear All",no_recent:"No recent chats",send:"Send",new_chat:"New Chat",toggle_editor:"Toggle Editor",toggle_diff:"Toggle Diff Panel",save_file:"Save File",quick_open:"Quick Open File",toggle_settings:"Toggle Settings",toggle_theme:"Toggle Theme",cycle_accent:"Cycle Accent Color",chat_history:"Chat History",ai_suggestion:"AI Suggestion",close_tab:"Close Active Tab",next_tab:"Next Tab",prev_tab:"Previous Tab",focus_chat:"Focus Chat Input",undo_changes:"Undo Changes",accept_changes:"Accept Changes",search_models:"Search GGUF models...",download:"Download",searching:"Searching...",no_models_found:"No GGUF models found",loading:"Loading...",ready_install:"Ready to install...",up_folder:"Up",no_subdirs:"No subdirectories",saved:"Saved",save_failed:"Save failed - check connection.",open_file_first:"Open a file first!",no_changes:"No changes yet",changes_accepted:"Changes accepted",reverted:"Reverted",no_changes_undo:"No changes to undo",undo_failed:"Undo failed",undo_confirm:"Undo all changes from this session?",clear_confirm:"Clear all chat history?",connection_error:"Connection error — is the server running? Check Settings for provider config.",generation_interrupted:"Generation interrupted.",error_prefix:"Error",placeholder_chat:"Ask Amni-Code to build, fix, or explain anything...",placeholder_cmd:"Type a command...",go_to_file:"Go to file...",language:"Language",split_view:"Split View",close_pane:"Close Pane",pane:"Pane",model_dir:"Local Model Directory",download_hf:"Download Models from Hugging Face",starting_server:"Starting Inference Server",server_launch_desc:"Launching Amni-AI — this may take 15-30 seconds on first start.",dismiss:"Dismiss",start_server:"Start Server",dark:"DARK",light:"LIGHT",errors:"errors",plaintext:"Plaintext",from_env:"(from ENV)",not_needed:"Not needed for Ollama"},
+const I18N={en:{agent_mode:"Agent mode",agent_mode_desc:"Plan proposes without touching files. Edit applies changes as it goes. Autonomous runs everything without asking.",explorer:"Explorer",welcome_title:"Welcome to Amni-Code",welcome_desc:"Your AI coding agent. Type anything below — ask it to build features, fix bugs, create files, run commands, or explain code. It will do the work for you.",welcome_hint:"Click ⚙ to configure your AI provider (Adam / Amni-AI local by default)",prompt_api:"Build an API",prompt_debug:"Debug code",prompt_explain:"Explain code",prompt_scaffold:"Scaffold project",settings:"Settings",provider:"Provider",model:"Model",api_key:"API Key",base_url:"Base URL",working_dir:"Working Directory",auto_approve:"Auto-approve all agent actions",auto_approve_desc:"When off, you'll see what the agent wants to do before it executes. When on, it acts autonomously.",code_changes:"Code Changes",undo:"Undo",accept:"Accept",recent_chats:"Recent Chats",clear_all:"Clear All",no_recent:"No recent chats",send:"Send",new_chat:"New Chat",toggle_editor:"Toggle Editor",toggle_diff:"Toggle Diff Panel",save_file:"Save File",quick_open:"Quick Open File",toggle_settings:"Toggle Settings",toggle_theme:"Toggle Theme",cycle_accent:"Cycle Accent Color",chat_history:"Chat History",ai_suggestion:"AI Suggestion",close_tab:"Close Active Tab",next_tab:"Next Tab",prev_tab:"Previous Tab",focus_chat:"Focus Chat Input",undo_changes:"Undo Changes",accept_changes:"Accept Changes",search_models:"Search GGUF models...",download:"Download",searching:"Searching...",no_models_found:"No GGUF models found",loading:"Loading...",ready_install:"Ready to install...",up_folder:"Up",no_subdirs:"No subdirectories",saved:"Saved",save_failed:"Save failed - check connection.",open_file_first:"Open a file first!",no_changes:"No changes yet",changes_accepted:"Changes accepted",reverted:"Reverted",no_changes_undo:"No changes to undo",undo_failed:"Undo failed",undo_confirm:"Undo all changes from this session?",clear_confirm:"Clear all chat history?",connection_error:"Connection error — is the server running? Check Settings for provider config.",generation_interrupted:"Generation interrupted.",error_prefix:"Error",placeholder_chat:"Ask Amni-Code to build, fix, or explain anything...",placeholder_cmd:"Type a command...",go_to_file:"Go to file...",language:"Language",split_view:"Split View",close_pane:"Close Pane",pane:"Pane",model_dir:"Local Model Directory",download_hf:"Download Models from Hugging Face",starting_server:"Starting Inference Server",server_launch_desc:"Launching Amni-AI — this may take 15-30 seconds on first start.",dismiss:"Dismiss",start_server:"Start Server",dark:"DARK",light:"LIGHT",errors:"errors",plaintext:"Plaintext",from_env:"(from ENV)",not_needed:"Not needed for Ollama"},
 es:{explorer:"Explorador",welcome_title:"Bienvenido a Amni-Code",welcome_desc:"Tu agente de código IA. Escribe cualquier cosa — pídele construir funciones, corregir errores, crear archivos o explicar código.",welcome_hint:"Haz clic en ⚙ para configurar tu proveedor de IA",prompt_api:"Crear una API",prompt_debug:"Depurar código",prompt_explain:"Explicar código",prompt_scaffold:"Crear proyecto",settings:"Ajustes",provider:"Proveedor",model:"Modelo",api_key:"Clave API",base_url:"URL Base",working_dir:"Directorio de trabajo",auto_approve:"Auto-aprobar acciones del agente",auto_approve_desc:"Cuando está desactivado, verás lo que el agente quiere hacer. Cuando está activado, actúa autónomamente.",code_changes:"Cambios de Código",undo:"Deshacer",accept:"Aceptar",recent_chats:"Chats Recientes",clear_all:"Borrar Todo",no_recent:"Sin chats recientes",send:"Enviar",new_chat:"Nuevo Chat",toggle_editor:"Alternar Editor",toggle_diff:"Alternar Panel Diff",save_file:"Guardar Archivo",quick_open:"Abrir Rápido",toggle_settings:"Alternar Ajustes",toggle_theme:"Alternar Tema",cycle_accent:"Cambiar Color Acento",chat_history:"Historial",ai_suggestion:"Sugerencia IA",close_tab:"Cerrar Pestaña",next_tab:"Siguiente Pestaña",prev_tab:"Pestaña Anterior",focus_chat:"Enfocar Chat",undo_changes:"Deshacer Cambios",accept_changes:"Aceptar Cambios",search_models:"Buscar modelos GGUF...",download:"Descargar",searching:"Buscando...",no_models_found:"No se encontraron modelos GGUF",loading:"Cargando...",placeholder_chat:"Pide a Amni-Code construir, corregir o explicar...",placeholder_cmd:"Escribe un comando...",go_to_file:"Ir a archivo...",language:"Idioma",split_view:"Vista Dividida",close_pane:"Cerrar Panel",pane:"Panel",dark:"OSCURO",light:"CLARO",errors:"errores",plaintext:"Texto plano"},
 fr:{explorer:"Explorateur",welcome_title:"Bienvenue sur Amni-Code",welcome_desc:"Votre agent de code IA. Tapez n'importe quoi — demandez-lui de créer, corriger, ou expliquer du code.",welcome_hint:"Cliquez ⚙ pour configurer votre fournisseur IA",prompt_api:"Créer une API",prompt_debug:"Déboguer",prompt_explain:"Expliquer le code",prompt_scaffold:"Créer un projet",settings:"Paramètres",provider:"Fournisseur",model:"Modèle",api_key:"Clé API",base_url:"URL de Base",working_dir:"Répertoire de travail",auto_approve:"Auto-approuver les actions",auto_approve_desc:"Désactivé: voir les actions avant exécution. Activé: mode autonome.",code_changes:"Modifications",undo:"Annuler",accept:"Accepter",recent_chats:"Chats Récents",clear_all:"Tout Effacer",no_recent:"Aucun chat récent",send:"Envoyer",new_chat:"Nouveau Chat",placeholder_chat:"Demandez à Amni-Code de construire, corriger ou expliquer...",placeholder_cmd:"Tapez une commande...",go_to_file:"Aller au fichier...",language:"Langue",split_view:"Vue Divisée",close_pane:"Fermer le Panneau",pane:"Panneau",dark:"SOMBRE",light:"CLAIR",errors:"erreurs"},
 de:{explorer:"Explorer",welcome_title:"Willkommen bei Amni-Code",welcome_desc:"Ihr KI-Coding-Agent. Tippen Sie etwas — bitten Sie ihn, Features zu bauen, Fehler zu beheben oder Code zu erklären.",welcome_hint:"Klicken Sie ⚙ um Ihren KI-Anbieter zu konfigurieren",settings:"Einstellungen",provider:"Anbieter",model:"Modell",api_key:"API-Schlüssel",auto_approve:"Automatische Genehmigung",code_changes:"Code-Änderungen",undo:"Rückgängig",accept:"Akzeptieren",recent_chats:"Letzte Chats",new_chat:"Neuer Chat",language:"Sprache",split_view:"Geteilte Ansicht",close_pane:"Bereich schließen",pane:"Bereich",dark:"DUNKEL",light:"HELL",errors:"Fehler",placeholder_chat:"Fragen Sie Amni-Code..."},
@@ -271,7 +380,8 @@ document.querySelectorAll('[data-i18n-title]').forEach(el=>{const k=el.getAttrib
   <div class="pane-container" id="pane-container">
   <div class="pane" id="pane-0" data-pane-id="0">
   <div class="chat-col">
-    <div class="header"><h1><span>Amni</span>-Code</h1><div class="cwd-info" id="cwd-info">📂 <span id="cwd-path">unknown</span></div><div class="header-actions">
+    <div class="header"><h1><span class="wm">Amni</span>-Code</h1><div class="cwd-info" id="cwd-info">📂 <span id="cwd-path">unknown</span></div><nav class="hdr-links"><a href="https://amni-scient.com" target="_blank" rel="noopener noreferrer">Site</a><a href="https://amni-scient.com/amni-code" target="_blank" rel="noopener noreferrer">Docs</a><a href="https://ko-fi.com/amnibro" target="_blank" rel="noopener noreferrer">Donate</a></nav><div class="header-actions">
+        <div class="skin-switch" role="group" aria-label="Skin"><button type="button" class="skin-btn" id="amni-skin-braid" onclick="AmniSkin.set('braid')">Braid</button><button type="button" class="skin-btn" id="amni-skin-amniscient" onclick="AmniSkin.set('amniscient')">Amniscient</button><button type="button" class="skin-btn" id="amni-tone-toggle" onclick="AmniSkin.toggleTone()">DARK</button></div>
         <button class="theme-cycle" id="menu-btn" title="Menu — themes, modes, commands (no typing)">≡ MENU</button>
         <button class="theme-toggle" id="theme-toggle" title="Toggle Theme">DARK</button>
         <button class="theme-cycle" id="theme-cycle" title="Cycle Accent Color">CODE</button>
@@ -303,7 +413,7 @@ document.querySelectorAll('[data-i18n-title]').forEach(el=>{const k=el.getAttrib
         <div class="keys">
           <div class="key" onclick="fillPrompt('Create a Python Flask API with user auth')" data-i18n="prompt_api">Build an API</div>
           <div class="key" onclick="fillPrompt('Find and fix the bug in main.py')" data-i18n="prompt_debug">Debug code</div>
-          <div class="key" onclick="fillPrompt('Explain how this codebase works')" data-i18n="prompt_explain">Explain code</div>
+          <div class="key" onclick="fillPrompt('Explain how this codebase works. List the folder, read README.md and architecture_map.md if present, and ground the answer in those files — do not invent TMU or GF(17) unless they appear there.')" data-i18n="prompt_explain">Explain code</div>
           <div class="key" onclick="fillPrompt('Set up a new React project with TypeScript')" data-i18n="prompt_scaffold">Scaffold project</div>
         </div>
       </div>
@@ -373,28 +483,29 @@ document.querySelectorAll('[data-i18n-title]').forEach(el=>{const k=el.getAttrib
   <h2 data-i18n="settings">Settings</h2>
   <label data-i18n="provider">Provider</label>
   <select id="cfg-provider">
-    <option value="xai">xAI (Grok)</option>
+    <option value="amni">Adam (local)</option>
+    <option value="xai">xAI Grok</option>
     <option value="openai">OpenAI</option>
-    <option value="anthropic">Anthropic (Claude)</option>
-    <option value="google">Google (Gemini)</option>
-    <option value="deepseek">DeepSeek</option>
-    <option value="groq">Groq</option>
-    <option value="mistral">Mistral</option>
-    <option value="cohere">Cohere</option>
-    <option value="together">Together AI</option>
-    <option value="fireworks">Fireworks AI</option>
-    <option value="perplexity">Perplexity</option>
-    <option value="openrouter">OpenRouter</option>
-    <option value="amni">Amni-AI (Local)</option>
-    <option value="ollama">Ollama (Local)</option>
-    <option value="local">Custom / OpenAI-compatible</option>
+    <option value="anthropic">Anthropic</option>
+    <option value="google">Google</option>
+    <option value="ollama">Ollama (local)</option>
+    <option value="local">Custom endpoint</option>
+    <optgroup label="Subscription CLIs (sign in, no key)">
+    <option value="claude-code">Claude Code</option>
+    <option value="codex">Codex CLI (ChatGPT)</option>
+    <option value="copilot">GitHub Copilot CLI</option>
+    <option value="cursor">Cursor CLI</option>
+    <option value="grok-cli">Grok CLI</option>
+    <option value="antigravity">Antigravity (Google)</option>
+    <option value="opencode">OpenCode</option>
+    </optgroup>
   </select>
   <label data-i18n="model">Model</label>
   <select id="cfg-model"><option>Loading...</option></select>
   <label id="api-key-label" data-i18n="api_key">API Key <span style="font-size:10px;color:var(--green)" id="key-src"></span></label>
   <input id="cfg-key" type="password" data-i18n-placeholder="not_needed" placeholder="Not needed for Ollama">
-  <label data-i18n="base_url">Base URL</label>
-  <input id="cfg-url" placeholder="http://localhost:11434">
+  <label id="base-url-label" data-i18n="base_url">Base URL</label>
+  <input id="cfg-url" placeholder="http://127.0.0.1:11434">
   <label data-i18n="working_dir">Working Directory</label>
   <div style="display:flex;gap:6px;align-items:center;margin-bottom:4px">
     <input id="cfg-dir" placeholder="Current directory" style="flex:1;margin:0">
@@ -458,7 +569,7 @@ document.querySelectorAll('[data-i18n-title]').forEach(el=>{const k=el.getAttrib
 <div class="toast-container" id="toast-container"></div>
 <div class="status-bar" id="status-bar">
   <div class="status-left"><span class="status-item" id="sb-branch">main</span><span class="status-item" id="sb-errors">0 errors</span></div>
-  <div class="status-right"><span class="status-item" id="sb-lang">Plaintext</span><span class="status-item" id="sb-pos">Ln 1, Col 1</span><span class="status-item">Amni-Code v2.2.0</span></div>
+  <div class="status-right"><span class="status-item" id="sb-lang">Plaintext</span><span class="status-item" id="sb-pos">Ln 1, Col 1</span><span class="status-item" id="sb-ver">Amni-Code</span></div>
 </div>
 <div class="cmd-overlay" id="cmd-overlay"></div>
 <div class="cmd-palette" id="cmd-palette">
@@ -538,6 +649,7 @@ $('#settings-btn').addEventListener('click', () => { $('#settings-panel').classL
 $('#settings-overlay').addEventListener('click', () => { $('#settings-panel').classList.remove('open'); $('#history-panel').classList.remove('open'); $('#settings-overlay').classList.remove('open'); saveConfig(); });
 $('#diff-toggle').addEventListener('click', toggleDiff);$('#theme-toggle').addEventListener('click', toggleTheme);function toggleDiff(){ $('#diff-col').classList.toggle('open'); $('#diff-toggle').classList.toggle('active'); }
 function toggleTheme(){
+  if(window.AmniSkin){const t=AmniSkin.toggleTone();$('#theme-toggle').textContent=t.tone==='dark'?'LIGHT':'DARK';localStorage.setItem('theme',t.tone);return}
   const body = document.body;
   const isLight = body.hasAttribute('data-theme') && body.getAttribute('data-theme') === 'light';
   if(isLight){
@@ -551,15 +663,162 @@ function toggleTheme(){
 }
 function escHtml(s){ const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
 function escJsStr(s){ return s.replace(/\\/g, '\\\\').replace(/'/g, "\\'"); }
-function renderMd(text){
-  return text
-    .replace(/```(\w*)\n([\s\S]*?)```/g, (_, lang, code) => `<pre><code>${escHtml(code.trim())}</code></pre>`)
-    .replace(/`([^`]+)`/g, '<code>$1</code>')
-    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-    .replace(/\n/g, '<br>')
-    .replace(/(https?:\/\/[^\s<"']+[^<.,:;"')\]\s])/g, '<a href="$1" target="_blank" rel="noopener" style="color:var(--accent);text-decoration:underline">$1</a>')
-    .replace(/([^\s<"']+@[^\s<"']+\.[^\s<"']+)/g, '<a href="mailto:$1" style="color:var(--accent);text-decoration:underline">$1</a>');
+(function(){
+const E={"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"};
+const esc=s=>String(s==null?"":s).replace(/[&<>"']/g,c=>E[c]);
+const HLKW={py:"and as assert async await break class continue def del elif else except finally for from global if import in is lambda nonlocal not or pass raise return try while with yield None True False self",
+ js:"await async break case catch class const continue default delete do else export extends finally for function if import in instanceof let new of return static super switch this throw try typeof var void while yield null true false undefined",
+ rs:"as async await break const continue crate dyn else enum extern fn for if impl in let loop match mod move mut pub ref return self static struct super trait type unsafe use where while true false",
+ sh:"if then else elif fi for while do done case esac function return export local source echo cd exit",
+ sql:"select from where insert update delete join left right inner outer group by order having limit values set into create table drop alter",
+ go:"break case chan const continue default defer else fallthrough for func go goto if import interface map package range return select struct switch type var nil true false"};
+HLKW.python=HLKW.py;HLKW.javascript=HLKW.js;HLKW.ts=HLKW.js;HLKW.typescript=HLKW.js;HLKW.jsx=HLKW.js;HLKW.tsx=HLKW.js;HLKW.rust=HLKW.rs;HLKW.bash=HLKW.sh;HLKW.shell=HLKW.sh;HLKW.zsh=HLKW.sh;HLKW.ps1=HLKW.sh;HLKW.powershell=HLKW.sh;HLKW.golang=HLKW.go;HLKW.c=HLKW.rs;HLKW.cpp=HLKW.rs;HLKW.java=HLKW.js;HLKW.kotlin=HLKW.js;HLKW.swift=HLKW.rs;
+function hl(src,lang){
+ lang=(lang||"").toLowerCase();
+ const kw=new Set((HLKW[lang]||HLKW.py).split(" ")),isJson=lang==="json",isW=c=>/[A-Za-z0-9_$]/.test(c);
+ let out="",i=0;const n=src.length;
+ while(i<n){
+  const c=src[i];
+  if((c==="#"&&!isJson&&!/^(js|ts|rs|go|c|cpp|java)/.test(lang))||(c==="/"&&src[i+1]==="/")){let j=src.indexOf("\n",i);j=j<0?n:j;out+='<span class="hl-com">'+esc(src.slice(i,j))+"</span>";i=j;continue}
+  if(c==="/"&&src[i+1]==="*"){let j=src.indexOf("*/",i);j=j<0?n:j+2;out+='<span class="hl-com">'+esc(src.slice(i,j))+"</span>";i=j;continue}
+  if(c==='"'||c==="'"||c==="`"){let j=i+1;while(j<n&&src[j]!==c){j+=src[j]==="\\"?2:1}j=Math.min(j+1,n);out+='<span class="hl-str">'+esc(src.slice(i,j))+"</span>";i=j;continue}
+  if(/[0-9]/.test(c)&&!isW(src[i-1]||"")){let j=i;while(j<n&&/[0-9a-fA-FxX._]/.test(src[j]))j++;out+='<span class="hl-num">'+esc(src.slice(i,j))+"</span>";i=j;continue}
+  if(isW(c)){let j=i;while(j<n&&isW(src[j]))j++;const w=src.slice(i,j);let k=j;while(k<n&&src[k]===" ")k++;out+=kw.has(w)?'<span class="hl-kw">'+esc(w)+"</span>":src[k]==="("?'<span class="hl-fn">'+esc(w)+"</span>":esc(w);i=j;continue}
+  if(/[+\-*/%=<>!|^~:?]/.test(c)){out+='<span class="hl-op">'+esc(c)+"</span>";i++;continue}
+  out+=esc(c);i++;
+ }
+ return out;
 }
+const RE={hr:/^ {0,3}([-*_])[ \t]*(?:\1[ \t]*){2,}$/,
+ head:/^ {0,3}(#{1,6})[ \t]+(.*?)[ \t]*#*[ \t]*$/,
+ quote:/^ {0,3}>[ \t]?(.*)$/,
+ li:/^([ \t]*)([-*+•]|\d{1,9}[.)])[ \t]+(.*)$/,
+ code:/^(?: {4}|\t)(.*)$/,
+ delim:/^[ \t]*(?=[^\n]*\|)\|?[ \t]*:?-+:?[ \t]*(?:\|[ \t]*:?-+:?[ \t]*)*\|?[ \t]*$/,
+ task:/^\[([ xX])\][ \t]+([\s\S]*)$/};
+const isBlock=l=>RE.hr.test(l)||RE.head.test(l)||RE.quote.test(l)||RE.li.test(l);
+function inl(s){
+ const cs=[];
+ s=String(s==null?"":s).replace(/(`+)([\s\S]*?[^`])\1(?!`)/g,(m,t,c)=>{cs.push(c);return ""+(cs.length-1)+""});
+ s=esc(s);
+ s=s.replace(/!\[([^\]]*)\]\(\s*([^)\s]+)[^)]*\)/g,(m,a,u)=>/^(https?:|data:image\/)/.test(u)?'<img src="'+u+'" alt="'+a+'" loading="lazy">':m);
+ s=s.replace(/\[([^\]]*)\]\(\s*([^)\s]+)[^)]*\)/g,(m,a,u)=>/^(https?:|mailto:|#|\/)/.test(u)?'<a href="'+u+'" target="_blank" rel="noopener">'+(a||u)+"</a>":m);
+ s=s.replace(/(^|[\s(])((?:https?:\/\/|www\.)[^\s<)]*[^\s<).,;:!?'"])/g,(m,p,u)=>p+'<a href="'+(u.indexOf("www.")===0?"https://"+u:u)+'" target="_blank" rel="noopener">'+u+"</a>");
+ s=s.replace(/\*\*\*(?=\S)([\s\S]*?\S)\*\*\*/g,"<strong><em>$1</em></strong>");
+ s=s.replace(/\*\*(?=\S)([\s\S]*?\S)\*\*/g,"<strong>$1</strong>");
+ s=s.replace(/(^|[^\w_])__(?=\S)([\s\S]*?\S)__(?!\w)/g,"$1<strong>$2</strong>");
+ s=s.replace(/(^|[^\w*])\*(?=\S)([^*\n]*?\S)\*(?!\w)/g,"$1<em>$2</em>");
+ s=s.replace(/(^|[^\w_])_(?=\S)([^_\n]*?\S)_(?!\w)/g,"$1<em>$2</em>");
+ s=s.replace(/~~(?=\S)([\s\S]*?\S)~~/g,"<s>$1</s>");
+ s=s.replace(/[ \t]{2,}$/gm,"<br>");
+ return s.replace(/(\d+)/g,(m,i)=>"<code>"+esc(cs[+i])+"</code>");
+}
+const liText=t=>{const m=RE.task.exec(t);return m?'<span class="task"><input type="checkbox" disabled'+(m[1]===" "?"":" checked")+">"+inl(m[2])+"</span>":inl(t)};
+function cells(row){
+ row=row.trim();
+ const lead=row.charAt(0)==="|",trail=row.length>1&&row.charAt(row.length-1)==="|"&&row.charAt(row.length-2)!=="\\";
+ const out=[];let cur="",tick=false;
+ for(let i=0;i<row.length;i++){
+  const c=row[i];
+  if(c==="\\"&&row[i+1]==="|"){cur+="|";i++;continue}
+  if(c==="`")tick=!tick;
+  if(c==="|"&&!tick){out.push(cur);cur="";continue}
+  cur+=c;
+ }
+ out.push(cur);
+ lead&&out.shift();trail&&out.pop();
+ return out.map(x=>x.trim());
+}
+function table(L,i){
+ const head=cells(L[i]);
+ if(!head.length)return null;
+ const al=cells(L[i+1]).map(c=>/^:-+:$/.test(c)?"center":/^:-+$/.test(c)?"left":/^-+:$/.test(c)?"right":"");
+ let j=i+2;const rows=[];
+ while(j<L.length&&L[j].trim()&&L[j].indexOf("|")>=0&&!RE.delim.test(L[j])){rows.push(cells(L[j]));j++}
+ const cellTag=(t,c,k)=>"<"+t+(al[k]?' style="text-align:'+al[k]+'"':"")+">"+inl(c)+"</"+t+">";
+ const th=head.map((c,k)=>cellTag("th",c,k)).join("");
+ const tb=rows.map(r=>"<tr>"+head.map((_,k)=>cellTag("td",r[k]||"",k)).join("")+"</tr>").join("");
+ return {html:'<div class="tw"><table><thead><tr>'+th+"</tr></thead><tbody>"+tb+"</tbody></table></div>",next:j};
+}
+function gather(L,i){
+ const items=[];let cur=null;
+ while(i<L.length){
+  const m=RE.li.exec(L[i]);
+  if(m){cur={ind:m[1].replace(/\t/g,"  ").length,ord:/\d/.test(m[2]),start:parseInt(m[2],10)||1,text:m[3]};items.push(cur);i++;continue}
+  if(!L[i].trim()){
+   let j=i;while(j<L.length&&!L[j].trim())j++;
+   if(j<L.length&&RE.li.test(L[j])){i=j;continue}
+   break}
+  if(cur&&/^[ \t]{2,}\S/.test(L[i])){cur.text+="\n"+L[i].trim();i++;continue}
+  break;
+ }
+ return {items:items,next:i};
+}
+function renderList(items,pos,ind){
+ const first=items[pos],ord=first.ord;
+ let html=ord?"<ol"+(first.start>1?' start="'+first.start+'"':"")+">":"<ul>";
+ while(pos<items.length&&items[pos].ind>=ind){
+  const it=items[pos];
+  if(it.ind>ind){
+   const sub=renderList(items,pos,it.ind);
+   html=/<\/li>$/.test(html)?html.replace(/<\/li>$/,sub.html+"</li>"):html+"<li>"+sub.html+"</li>";
+   pos=sub.pos;continue}
+  if(it.ord!==ord)break;
+  html+="<li>"+liText(it.text)+"</li>";
+  pos++;
+ }
+ return {html:html+(ord?"</ol>":"</ul>"),pos:pos};
+}
+function blocks(src){
+ const L=String(src==null?"":src).replace(/\r\n?/g,"\n").split("\n");
+ let out="",i=0;
+ while(i<L.length){
+  const l=L[i];
+  if(!l.trim()){i++;continue}
+  if(RE.hr.test(l)){out+="<hr>";i++;continue}
+  let m=RE.head.exec(l);
+  if(m){const n=Math.min(m[1].length,4);out+="<h"+n+">"+inl(m[2])+"</h"+n+">";i++;continue}
+  if(RE.quote.test(l)){
+   const buf=[];
+   while(i<L.length&&L[i].trim()&&(RE.quote.test(L[i])||buf.length&&!isBlock(L[i]))){const q=RE.quote.exec(L[i]);buf.push(q?q[1]:L[i].trim());i++}
+   out+="<blockquote>"+blocks(buf.join("\n"))+"</blockquote>";continue}
+  if(i+1<L.length&&l.indexOf("|")>=0&&RE.delim.test(L[i+1])){
+   const t=table(L,i);
+   if(t){out+=t.html;i=t.next;continue}}
+  if(RE.li.test(l)){
+   const g=gather(L,i);
+   if(g.items.length){
+    let pos=0;
+    while(pos<g.items.length){const r=renderList(g.items,pos,g.items[pos].ind);out+=r.html;pos=r.pos>pos?r.pos:pos+1}
+    i=g.next;continue}}
+  if(RE.code.test(l)){
+   const buf=[];
+   while(i<L.length){
+    if(!L[i].trim()){let j=i;while(j<L.length&&!L[j].trim())j++;if(j>=L.length||!RE.code.test(L[j]))break;buf.push("");i=j;continue}
+    if(!RE.code.test(L[i]))break;
+    buf.push(RE.code.exec(L[i])[1]);i++}
+   out+="<pre><code>"+esc(buf.join("\n"))+"</code></pre>";continue}
+  const buf=[];
+  while(i<L.length&&L[i].trim()&&!isBlock(L[i])&&!(i+1<L.length&&L[i].indexOf("|")>=0&&RE.delim.test(L[i+1]))){buf.push(L[i]);i++}
+  if(!buf.length){buf.push(L[i]);i++}
+  out+="<p>"+inl(buf.join("\n")).replace(/\n+/g," ")+"</p>";
+ }
+ return out;
+}
+function fence(b){
+ const lang=(b.lang||"").toLowerCase();
+ return '<div class="cb"><div class="cb-bar"><span class="cb-lang">'+esc(lang||"text")+'</span><button type="button" class="cb-copy" onclick="copyCode(this)">copy</button></div><pre><code class="lang-'+esc(lang||"txt")+'">'+hl(b.src,lang)+"</code></pre></div>";
+}
+function md(t){
+ const code=[];
+ let s=String(t==null?"":t).replace(/\r\n?/g,"\n");
+ s=s.replace(/(^|\n)[ \t]{0,3}(```|~~~)([^\n]*)\n([\s\S]*?)(?:\n[ \t]{0,3}\2+[ \t]*(?=\n|$)|$)/g,(m,p,f,info,body)=>{code.push({lang:(info||"").trim().split(/[\s,]+/)[0],src:body});return p+""+(code.length-1)+""});
+ return blocks(s).replace(/(?:<p>)?(\d+)(?:<\/p>)?/g,(m,i)=>{const b=code[+i];return b?fence(b):""});
+}
+window.copyCode=function(btn){const pre=btn.closest(".cb").querySelector("pre");const txt=pre?pre.innerText:"";const done=()=>{btn.textContent="copied";setTimeout(()=>{btn.textContent="copy"},1200)};(navigator.clipboard?navigator.clipboard.writeText(txt).then(done,done):done())};
+window.md=md;window.mdInline=inl;window.mdEsc=esc;window.hl=hl;
+window.renderMd=t=>{try{return md(t)}catch(e){return "<p>"+esc(t)+"</p>"}};
+})();
 function renderWidget(w){
   if(!w||!w.type)return '';
   const t=w.type;const d=w.data||{};const title=escHtml(w.title||t);const icon=escHtml(w.icon||({weather:'☁',system:'⚙',time:'⧗',news:'▤',stock:'▲',code:'<>',file:'·',git:'⎇',disk:'▢',watch:'□',error:'!',info:'i'}[t]||'◆'));
@@ -759,6 +1018,7 @@ const res=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'applic
               sessionId = data.session_id;
               break;
             case 'thinking':
+              if(data.text)updateThinking(data.text);
               break;
             case 'tool_start':
               updateThinking(data.tool + '...');
@@ -856,29 +1116,40 @@ async function loadConfig(){
   try{
     const res = await fetch('/api/config');
     const c = await res.json();
-    $('#cfg-provider').value = c.provider;
-    $('#cfg-key').value = c.api_key;
-    $('#cfg-url').value = c.base_url;
-$('#cfg-dir').value=c.working_dir;$('#cwd-path').textContent=c.working_dir||'unknown';if(c.model_dir)$('#cfg-model-dir').value=c.model_dir;if(c.auto_approve)$('#cfg-auto').classList.add('on');else $('#cfg-auto').classList.remove('on');$('#cfg-mode').value=c.mode||'edit';if(c.api_key)$('#key-src').textContent='(from ENV)';const noKey=c.provider==='ollama'||c.provider==='local'||c.provider==='amni';$('#model-dir-section').style.display=(c.provider==='ollama'||c.provider==='local')?'block':'none';$('#api-key-label').style.display=noKey?'none':'block';$('#cfg-key').style.display=noKey?'none':'block';if(c.provider==='amni'||c.provider==='local')checkAndStartServer();else await loadModels(c.model);loadDirs(c.working_dir);loadSidebar(c.working_dir);
+    const _cwd=c.working_dir||'';const _pe=$('#cwd-path');if(_pe)_pe.textContent=_cwd||'unknown';
+    if($('#cfg-provider')){const p=CORE_PROVIDERS[c.provider]?c.provider:'amni';$('#cfg-provider').value=p;if(p!==c.provider)c.provider=p;applyProviderChrome(p)}
+    if($('#cfg-key'))$('#cfg-key').value = c.api_key;
+    if($('#cfg-url'))$('#cfg-url').value = c.base_url;
+if($('#cfg-dir'))$('#cfg-dir').value=_cwd;if(c.model_dir&&$('#cfg-model-dir'))$('#cfg-model-dir').value=c.model_dir;if($('#cfg-auto')){if(c.auto_approve)$('#cfg-auto').classList.add('on');else $('#cfg-auto').classList.remove('on')}if($('#cfg-mode'))$('#cfg-mode').value=c.mode||'edit';if(c.api_key&&$('#key-src'))$('#key-src').textContent='(from ENV)';await loadModels(c.model);loadDirs(_cwd);loadSidebar(_cwd);
   } catch(e){console.error('loadConfig:',e);}
+}
+const MODEL_LABELS={'adam:3b':'Adam 3B — Granite 4.1','adam:8b':'Adam 8B — Granite 4.1','adam:granite-gf17':'Adam (live bake)','adam:granite-3b':'Adam 3B — Granite 4.1','adam:granite-8b':'Adam 8B — Granite 4.1'};
+const CORE_PROVIDERS={amni:{url:'http://127.0.0.1:7700',key:false,models:['adam:3b','adam:8b']},xai:{url:'https://api.x.ai',key:true,models:['grok-4','grok-4-1-fast-reasoning','grok-3','grok-3-mini']},openai:{url:'https://api.openai.com',key:true,models:['gpt-4o','gpt-4o-mini','gpt-4.1','o3','o4-mini']},anthropic:{url:'https://api.anthropic.com',key:true,models:['claude-sonnet-4-20250514','claude-opus-4-20250514','claude-haiku-4-20250514']},google:{url:'https://generativelanguage.googleapis.com',key:true,models:['gemini-2.5-pro','gemini-2.5-flash']},ollama:{url:'http://127.0.0.1:11434',key:false,models:[]},local:{url:'http://127.0.0.1:11434',key:true,models:[]},'claude-code':{url:'',key:false,cli:true,models:[]},codex:{url:'',key:false,cli:true,models:[]},copilot:{url:'',key:false,cli:true,models:[]},cursor:{url:'',key:false,cli:true,models:[]},'grok-cli':{url:'',key:false,cli:true,models:[]},antigravity:{url:'',key:false,cli:true,models:[]},opencode:{url:'',key:false,cli:true,models:[]}};
+let SEATS=null;
+async function seatStatus(p){
+  let el=$('#seat-status');
+  if(!el){el=document.createElement('div');el.id='seat-status';el.className='seat-status';const anchor=$('#cfg-provider');anchor&&anchor.parentNode.insertBefore(el,anchor.nextSibling);}
+  const c=CORE_PROVIDERS[p];
+  if(!c||!c.cli){el.style.display='none';return;}
+  el.style.display='block';el.innerHTML='<span class="dim">checking '+escHtml(p)+'…</span>';
+  try{if(!SEATS){const r=await fetch('/api/seats');SEATS=(await r.json()).seats||[];}}catch(e){SEATS=[];}
+  const st=SEATS.find(x=>x.id===p);
+  if(!st){el.innerHTML='<span class="dim">no seat info</span>';return;}
+  el.innerHTML=st.installed?'<span class="seat-ok">● '+escHtml(st.label)+' found</span> <span class="dim">'+escHtml(st.path)+'</span><div class="dim">'+escHtml(st.hint)+'</div>':'<span class="seat-no">○ '+escHtml(st.label)+' not installed</span><div class="dim">get it: '+escHtml(st.get)+' · '+escHtml(st.hint)+'</div>';
+}
+function applyProviderChrome(p){
+  const c=CORE_PROVIDERS[p]||CORE_PROVIDERS.local;
+  const showKey=!!c.key&&!c.cli;const showUrl=(p==='local'||p==='ollama');
+  seatStatus(p);
+  if($('#api-key-label'))$('#api-key-label').style.display=showKey?'block':'none';
+  if($('#cfg-key'))$('#cfg-key').style.display=showKey?'block':'none';
+  if($('#base-url-label'))$('#base-url-label').style.display=showUrl?'block':'none';
+  if($('#cfg-url'))$('#cfg-url').style.display=showUrl?'block':'none';
+  if($('#model-dir-section'))$('#model-dir-section').style.display=(p==='ollama')?'block':'none';
 }
 async function loadModels(current){
   try{
-    const PROVIDER_MODELS = {
-      xai:['grok-4','grok-4-fast','grok-3','grok-3-fast','grok-2-1212'],
-      openai:['gpt-5','gpt-5-mini','gpt-4.1','gpt-4.1-mini','gpt-4.1-nano','gpt-4o','gpt-4o-mini','o3','o3-pro','o4-mini','o3-mini'],
-      anthropic:['claude-opus-4-20250514','claude-sonnet-4-20250514','claude-haiku-4-20250514'],
-      google:['gemini-2.5-pro','gemini-2.5-flash','gemini-2.0-flash','gemini-2.0-flash-lite','gemini-1.5-pro'],
-      deepseek:['deepseek-chat','deepseek-reasoner','deepseek-coder'],
-      groq:['llama-3.3-70b-versatile','llama-3.1-8b-instant','mixtral-8x7b-32768','gemma2-9b-it','deepseek-r1-distill-llama-70b'],
-      mistral:['mistral-large-latest','mistral-medium-latest','mistral-small-latest','codestral-latest','open-mistral-nemo'],
-      cohere:['command-r-plus','command-r','command-a-03-2025'],
-      together:['meta-llama/Llama-3.3-70B-Instruct-Turbo','meta-llama/Meta-Llama-3.1-405B-Instruct-Turbo','deepseek-ai/DeepSeek-R1','Qwen/Qwen2.5-72B-Instruct-Turbo','mistralai/Mixtral-8x22B-Instruct-v0.1'],
-      fireworks:['accounts/fireworks/models/llama-v3p3-70b-instruct','accounts/fireworks/models/mixtral-8x22b-instruct','accounts/fireworks/models/deepseek-r1'],
-      perplexity:['sonar-pro','sonar','sonar-deep-research','sonar-reasoning-pro'],
-      openrouter:['openai/gpt-4o','anthropic/claude-sonnet-4','google/gemini-2.5-pro','meta-llama/llama-3.3-70b-instruct','deepseek/deepseek-r1'],
-      amni:[],ollama:[],local:[]
-    };
+    const PROVIDER_MODELS=Object.fromEntries(Object.entries(CORE_PROVIDERS).map(([k,v])=>[k,v.models]));
     const res = await fetch('/api/models');
     const data = await res.json();
     const sel = $('#cfg-model');
@@ -886,19 +1157,15 @@ async function loadModels(current){
     const p = $('#cfg-provider').value;
     let mlist = data.models.length ? data.models : (PROVIDER_MODELS[p] || []);
     if(mlist.length === 0){
-      if((p === 'local' || p === 'amni') && !$('#server-start-overlay').classList.contains('open')){
-        sel.innerHTML = '<option>(starting server...)</option>';
-        checkAndStartServer();
-        return;
-      }
-      const hint = p === 'ollama' ? '(no models &mdash; run: ollama pull <model>)' : p === 'amni' ? '(no models &mdash; is Amni-AI running on :7700?)' : '(no models found)';
-      sel.innerHTML = `<option>${hint}</option>`;
+      const hint = p === 'ollama' ? '(pull a model: ollama pull llama3.2)' : p === 'amni' ? '(Adam on :7700)' : '(type a model id)';
+      sel.innerHTML = `<option value="">${hint}</option>`;
       return;
     }
     data.models = mlist;
+    if(p==='amni'){const pin=['adam:3b','adam:8b'];mlist=pin.concat(mlist.filter(x=>pin.indexOf(x)<0));data.models=mlist}
     data.models.forEach(m => {
       const opt = document.createElement('option');
-      opt.value = m; opt.textContent = m;
+      opt.value = m; opt.textContent = MODEL_LABELS[m]||m;
       sel.appendChild(opt);
     });
     if(current && data.models.includes(current)){
@@ -1054,24 +1321,11 @@ async function checkAndStartServer(){
 }
 $('#cfg-provider').addEventListener('change', () => {
   const p = $('#cfg-provider').value;
-  const PROVIDER_URLS = {
-    ollama:'http://localhost:11434', local:'http://localhost:8787', amni:'http://127.0.0.1:7700',
-    openai:'https://api.openai.com', anthropic:'https://api.anthropic.com', xai:'https://api.x.ai',
-    google:'https://generativelanguage.googleapis.com', deepseek:'https://api.deepseek.com',
-    groq:'https://api.groq.com', mistral:'https://api.mistral.ai', cohere:'https://api.cohere.com',
-    together:'https://api.together.xyz', fireworks:'https://api.fireworks.ai',
-    perplexity:'https://api.perplexity.ai', openrouter:'https://openrouter.ai'
-  };
-  if(PROVIDER_URLS[p]) $('#cfg-url').value = PROVIDER_URLS[p];
-  const isLocal = p === 'ollama' || p === 'local' || p === 'amni';
-  $('#model-dir-section').style.display = (p === 'ollama' || p === 'local') ? 'block' : 'none';
-  $('#api-key-label').style.display = isLocal ? 'none' : 'block';
-  $('#cfg-key').style.display = isLocal ? 'none' : 'block';
+  const c=CORE_PROVIDERS[p]||CORE_PROVIDERS.amni;
+  if(c.url)$('#cfg-url').value=c.url;
+  applyProviderChrome(p);
   $('#cfg-model').innerHTML = '<option>Loading...</option>';
-  saveConfig().then(() => {
-    if(p === 'amni' || p === 'local') checkAndStartServer();
-    else loadModels();
-  });
+  saveConfig().then(() => loadModels());
 });
 $('#cfg-url').addEventListener('change', () => { saveConfig().then(() => loadModels()); });
 $('#cfg-model-dir').addEventListener('change', () => { saveConfig().then(() => loadModels()); });
@@ -1179,11 +1433,13 @@ async function hfPollProgress(){
   } catch(e){}
 }
 loadConfig();
-const savedTheme = localStorage.getItem('theme');
-if(savedTheme === 'light'){
+const savedTheme = localStorage.getItem('theme')||localStorage.getItem('amni-theme');
+if(window.AmniSkin){AmniSkin.boot();if(savedTheme==='light'||savedTheme==='dark')AmniSkin.setTone(savedTheme);$('#theme-toggle').textContent=AmniSkin.tone()==='dark'?'LIGHT':'DARK'}
+else if(savedTheme === 'light'){
   document.body.setAttribute('data-theme', 'light');
   $('#theme-toggle').textContent = 'LIGHT';
 }
+fetch('/health').then(r=>r.json()).then(j=>{const el=$('#sb-ver');if(el&&j&&j.version)el.textContent='Amni-Code v'+j.version}).catch(()=>{});
 const savedAccent = localStorage.getItem('accentTheme');
 if(savedAccent){
   document.body.className = document.body.className.replace(/theme-\S+/g, '');
@@ -1209,12 +1465,14 @@ const AMNI_THEMES={
  'clean-light':{label:'Clean Light',vars:{'--bg':'#ffffff','--panel':'#f4f6f8','--border':'#e1e4e8','--surface2':'#eaeef2','--accent':'#2563eb','--accent-dim':'rgba(37,99,235,.1)','--accent-glow':'rgba(37,99,235,.2)','--text':'#1f2937','--text2':'#6b7280','--dim':'#6b7280','--user-text':'#ffffff','--gold':'#d97706','--error':'#dc2626'}},
  nebula:{label:'Nebula',vars:{'--bg':'#0c0518','--panel':'#1a0a2e','--border':'#2d1b44','--surface2':'#241038','--accent':'#d946ef','--accent-dim':'rgba(217,70,239,.15)','--accent-glow':'rgba(217,70,239,.3)','--text':'#fbe8ff','--text2':'#8b6f9e','--dim':'#8b6f9e','--user-text':'#1a0a2e','--gold':'#f0abfc','--error':'#fb7185'}},
  terminal:{label:'Terminal',vars:{'--bg':'#000800','--panel':'#001a00','--border':'#0a3a0a','--surface2':'#012001','--accent':'#00ff66','--accent-dim':'rgba(0,255,102,.15)','--accent-glow':'rgba(0,255,102,.3)','--text':'#c7ffd0','--text2':'#3a7a4a','--dim':'#3a7a4a','--user-text':'#001a00','--gold':'#aaff00','--error':'#ff5555'}},
- solar:{label:'Solar',vars:{'--bg':'#1a1410','--panel':'#241b12','--border':'#3a2c1c','--surface2':'#2e2316','--accent':'#ffb347','--accent-dim':'rgba(255,179,71,.15)','--accent-glow':'rgba(255,179,71,.3)','--text':'#fdf0dd','--text2':'#9a836a','--dim':'#9a836a','--user-text':'#241b12','--gold':'#ffd166','--error':'#ef6f6c'}}
+ solar:{label:'Solar',vars:{'--bg':'#1a1410','--panel':'#241b12','--border':'#3a2c1c','--surface2':'#2e2316','--accent':'#ffb347','--accent-dim':'rgba(255,179,71,.15)','--accent-glow':'rgba(255,179,71,.3)','--text':'#fdf0dd','--text2':'#9a836a','--dim':'#9a836a','--user-text':'#241b12','--gold':'#ffd166','--error':'#ef6f6c'}},
+ braid:{label:'Braid',vars:{'--bg':'#0A0B0E','--panel':'#13161C','--border':'#242832','--surface2':'#0F1217','--accent':'#A88FE8','--accent-dim':'rgba(168,143,232,.11)','--accent-glow':'rgba(168,143,232,.28)','--text':'#ECEEF1','--text2':'#B9BFC8','--dim':'#767D88','--user-text':'#100A1F','--gold':'#E2B366','--error':'#FF6B6B'}},
+ amniscient:{label:'Amniscient',vars:{'--bg':'#08090B','--panel':'#111418','--border':'#20242B','--surface2':'#0D0F12','--accent':'#C89B4E','--accent-dim':'rgba(200,155,78,.10)','--accent-glow':'transparent','--text':'#EDEFF2','--text2':'#A7ADB6','--dim':'#6D747D','--user-text':'#120C03','--gold':'#E8B04B','--error':'#FF6B6B'}}
 };
-function applyAmniTheme(name){const t=AMNI_THEMES[name]||AMNI_THEMES.jarvis;const r=document.documentElement;for(const k in t.vars)r.style.setProperty(k,t.vars[k]);document.body.setAttribute('data-amni-theme',name);try{localStorage.setItem('amniTheme',name)}catch(e){}}
-function cycleAmniTheme(){const ks=Object.keys(AMNI_THEMES);const cur=localStorage.getItem('amniTheme')||'jarvis';const nx=ks[(ks.indexOf(cur)+1)%ks.length];applyAmniTheme(nx);showToast('Theme: '+AMNI_THEMES[nx].label)}
+function applyAmniTheme(name){if(name==='braid'||name==='amniscient'){document.documentElement.removeAttribute('style');if(window.AmniSkin)AmniSkin.set(name);document.body.setAttribute('data-amni-theme',name);try{localStorage.setItem('amniTheme',name)}catch(e){}return}const t=AMNI_THEMES[name]||AMNI_THEMES.jarvis;const r=document.documentElement;for(const k in t.vars)r.style.setProperty(k,t.vars[k]);document.body.setAttribute('data-amni-theme',name);document.documentElement.removeAttribute('data-skin');try{localStorage.setItem('amni_skin','legacy');localStorage.setItem('amniTheme',name)}catch(e){}}
+function cycleAmniTheme(){const ks=['braid','amniscient'].concat(Object.keys(AMNI_THEMES).filter(n=>n!=='braid'&&n!=='amniscient'));const cur=localStorage.getItem('amniTheme')||localStorage.getItem('amni_skin')||'braid';const nx=ks[(Math.max(0,ks.indexOf(cur))+1)%ks.length];applyAmniTheme(nx);showToast('Theme: '+(AMNI_THEMES[nx]?AMNI_THEMES[nx].label:nx))}
 function openAmniAi(){try{if(typeof checkAndStartServer==='function')checkAndStartServer();}catch(e){}showToast('Opening Amni-AI (Adam) — :7700');window.open('http://127.0.0.1:7700/jarvis','_blank');}
-(function(){const s=localStorage.getItem('amniTheme');if(s&&AMNI_THEMES[s])applyAmniTheme(s);})();
+(function(){const skin=localStorage.getItem('amni_skin');if(skin==='braid'||skin==='amniscient'){applyAmniTheme(skin);return}const s=localStorage.getItem('amniTheme');if(s==='braid'||s==='amniscient'){applyAmniTheme(s);return}if(s&&AMNI_THEMES[s])applyAmniTheme(s);else if(window.AmniSkin)AmniSkin.boot()})();
 
 // Accent Theme Cycling
 const accentThemes = ['code','crypt','haven','ai','core','explore','calc','green'];
@@ -1413,6 +1671,8 @@ const cmdCommands = [
   { label: 'Undo Changes', key: '', fn: undoChanges },
   { label: 'Accept Changes', key: '', fn: acceptChanges },
   { label: 'Open Amni-AI (Adam) ↗', key: '', fn: openAmniAi },
+  { label: 'Skin: Braid', key: '', fn: () => applyAmniTheme('braid') },
+  { label: 'Skin: Amniscient', key: '', fn: () => applyAmniTheme('amniscient') },
   { label: 'Theme: Jarvis', key: '', fn: () => applyAmniTheme('jarvis') },
   { label: 'Theme: Scient', key: '', fn: () => applyAmniTheme('scient') },
   { label: 'Theme: Clean Dark', key: '', fn: () => applyAmniTheme('clean-dark') },

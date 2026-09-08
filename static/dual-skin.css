@@ -1,0 +1,98 @@
+@font-face{font-family:Archivo;font-style:normal;font-weight:100 900;font-stretch:62% 125%;font-display:swap;src:url(/assets/fonts/archivo-var.woff2) format("woff2");unicode-range:U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD}
+@font-face{font-family:Archivo;font-style:normal;font-weight:100 900;font-stretch:62% 125%;font-display:swap;src:url(/assets/fonts/archivo-var-ext.woff2) format("woff2");unicode-range:U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF}
+html[data-skin=braid],html[data-skin=braid][data-theme=light]{
+--paper:#FBFAF8;--surface:#FFFFFF;--sunk:#F4F2EE;--ink:#14161A;--ink2:#3F444C;--mut:#7A8089;--rule:#E7E3DB;--rule2:#D8D3C9;
+--you:#5A48B0;--you-soft:#8F76DC;--you-dim:rgba(90,72,176,.09);--you-glow:rgba(90,72,176,.2);--you-ink:#fff;
+--good:#00915C;--warn:#B7791F;--bad:#C0392B;--gold:#B7791F;
+--shadow:0 1px 2px rgba(20,22,26,.05),0 8px 24px -12px rgba(20,22,26,.14);
+--sans:"Segoe UI Variable Text","Segoe UI Variable","Segoe UI",system-ui,-apple-system,Inter,Roboto,sans-serif;
+--serif:"Bodoni MT","Didot","Playfair Display","Palatino Linotype",Georgia,serif;
+--mono:"Cascadia Code",ui-monospace,Consolas,monospace;
+--r:14px;--radius:14px;--hairline:color-mix(in srgb,#000 6%,transparent);
+--font:var(--sans);--font-sans:var(--sans);--font-mono:var(--mono);--font-serif:var(--serif);
+--bg:var(--paper);--bg2:var(--sunk);--panel:var(--surface);--panel2:var(--sunk);--in:var(--sunk);
+--line:var(--rule);--line2:var(--rule2);--border:var(--rule);--border2:var(--rule2);
+--fg:var(--ink);--text:var(--ink);--text2:var(--ink2);--mute:var(--mut);--dim:var(--mut);--soft:var(--ink2);
+--acc:var(--you);--acc-soft:var(--you-soft);--acc-dim:var(--you-dim);--acc-glow:var(--you-glow);--accent:var(--you);--accent-dim:var(--you-dim);--accent-glow:var(--you-glow);--accent-ink:var(--you-ink);
+--cyan:var(--you);--cyan2:var(--you-soft);--magenta:var(--you-soft);--ok:var(--good);--err:var(--bad);--error:var(--bad);
+--me-bg:#EFE8FF;--me-line:#C4B3F2;--user-text:var(--ink);
+--tx:var(--ink);--p:var(--surface);--u:var(--you);--b:var(--rule);
+--user:var(--you);--bot:var(--surface);--badge:var(--sunk);--text-dim:var(--ink2);--text-faint:var(--mut);--accent2:var(--you-soft);--accent3:var(--gold);--bg-0:var(--paper);--bg-1:var(--sunk);--bg-2:var(--surface);
+--glass:color-mix(in srgb,var(--paper) 72%,transparent);--panel-rgb:255,255,255;--c-rgb:90,72,176;--m-rgb:143,118,220;--g-rgb:183,121,31;
+color-scheme:light}
+html[data-skin=braid][data-theme=dark]{
+--paper:#0A0B0E;--surface:#13161C;--sunk:#0F1217;--ink:#ECEEF1;--ink2:#B9BFC8;--mut:#767D88;--rule:#242832;--rule2:#313641;
+--you:#A88FE8;--you-soft:#C4B3F2;--you-dim:rgba(168,143,232,.11);--you-glow:rgba(168,143,232,.28);--you-ink:#100A1F;
+--good:#00FF9D;--warn:#E2B366;--bad:#FF6B6B;--gold:#E2B366;
+--shadow:0 1px 2px rgba(0,0,0,.4),0 10px 30px -14px rgba(0,0,0,.7);
+--hairline:color-mix(in srgb,#fff 9%,transparent);
+--me-bg:#1A1428;--me-line:#5A48B0;--user-text:#100A1F;
+--glass:color-mix(in srgb,var(--paper) 72%,transparent);--panel-rgb:19,22,28;--c-rgb:168,143,232;--m-rgb:196,179,242;--g-rgb:226,179,102;
+color-scheme:dark}
+html[data-skin=amniscient],html[data-skin=amniscient][data-theme=dark]{
+--paper:#08090B;--surface:#111418;--sunk:#0D0F12;--ink:#EDEFF2;--ink2:#A7ADB6;--mut:#6D747D;--rule:#20242B;--rule2:#2E343D;
+--you:#C89B4E;--you-soft:#E2BC7C;--you-dim:rgba(200,155,78,.10);--you-glow:transparent;--you-ink:#120C03;
+--good:#3DD68C;--warn:#E8B04B;--bad:#FF6B6B;--gold:#E8B04B;
+--shadow:0 1px 2px rgba(0,0,0,.4);
+--sans:"Archivo","Segoe UI Variable Display","Segoe UI",system-ui,-apple-system,Roboto,sans-serif;
+--serif:"Source Serif 4","Iowan Old Style","Palatino Linotype",Georgia,serif;
+--mono:"Cascadia Code","JetBrains Mono",ui-monospace,Consolas,monospace;
+--r:4px;--radius:4px;--hairline:color-mix(in srgb,#fff 9%,transparent);--w-cond:80%;
+--font:var(--sans);--font-sans:var(--sans);--font-mono:var(--mono);--font-serif:var(--serif);
+--bg:var(--paper);--bg2:var(--sunk);--panel:var(--surface);--panel2:#161A20;--in:#0D0F12;
+--line:var(--rule);--line2:var(--rule2);--border:var(--rule);--border2:var(--rule2);
+--fg:var(--ink);--text:var(--ink);--text2:var(--ink2);--mute:var(--mut);--dim:var(--mut);--soft:var(--ink2);
+--acc:var(--you);--acc-soft:var(--you-soft);--acc-dim:var(--you-dim);--acc-glow:transparent;--accent:var(--you);--accent-dim:var(--you-dim);--accent-glow:transparent;--accent-ink:var(--you-ink);
+--cyan:var(--you);--cyan2:var(--you-soft);--magenta:#E2BC7C;--ok:var(--good);--err:var(--bad);--error:var(--bad);
+--me-bg:#16120A;--me-line:#6A5220;--user-text:#120C03;
+--tx:var(--ink);--p:var(--surface);--u:var(--you);--b:var(--rule);
+--user:var(--you);--bot:var(--surface);--badge:var(--sunk);--text-dim:var(--ink2);--text-faint:var(--mut);--accent2:var(--you-soft);--accent3:var(--gold);--bg-0:var(--paper);--bg-1:var(--sunk);--bg-2:var(--surface);
+--glass:transparent;--panel-rgb:17,20,24;--c-rgb:200,155,78;--m-rgb:226,188,124;--g-rgb:232,176,75;
+color-scheme:dark}
+html[data-skin=amniscient][data-theme=light]{
+--paper:#F3F2EF;--surface:#FFFFFF;--sunk:#EAE9E4;--ink:#101216;--ink2:#454A52;--mut:#767B84;--rule:#E0DED8;--rule2:#CBC7BE;
+--you:#8A6318;--you-soft:#A2762A;--you-dim:rgba(138,99,24,.09);--you-glow:transparent;--you-ink:#FFFFFF;
+--good:#15803D;--warn:#B7791F;--bad:#C0392B;--gold:#B7791F;
+--shadow:0 1px 2px rgba(20,22,26,.05);
+--hairline:color-mix(in srgb,#000 6%,transparent);
+--me-bg:#F6EEDC;--me-line:#D4B56A;--user-text:#FFFFFF;
+--glass:transparent;--panel-rgb:255,255,255;--c-rgb:138,99,24;--m-rgb:162,118,42;--g-rgb:183,121,31;
+color-scheme:light}
+html[data-skin=braid] header,html[data-skin=braid] .header{
+background:var(--glass)!important;backdrop-filter:saturate(180%) blur(20px);-webkit-backdrop-filter:saturate(180%) blur(20px);border:1px solid var(--hairline)!important;box-shadow:none}
+html[data-skin=braid] .title,html[data-skin=braid] .wm,html[data-skin=braid] .logo,html[data-skin=braid] .logo b,html[data-skin=braid] #sidebar .brand h1,html[data-skin=braid] header h1 span,html[data-skin=braid] .header h1 span,html[data-skin=braid] .brand h1{
+font-family:var(--serif);font-weight:550;letter-spacing:.01em;background-image:linear-gradient(160deg,#5A48B0,#8F76DC);-webkit-background-clip:text;background-clip:text;color:transparent;text-shadow:none}
+html[data-skin=braid][data-theme=dark] .title,html[data-skin=braid][data-theme=dark] .wm,html[data-skin=braid][data-theme=dark] .logo,html[data-skin=braid][data-theme=dark] .logo b,html[data-skin=braid][data-theme=dark] #sidebar .brand h1,html[data-skin=braid][data-theme=dark] header h1 span,html[data-skin=braid][data-theme=dark] .header h1 span,html[data-skin=braid][data-theme=dark] .brand h1{background-image:linear-gradient(160deg,#EFE7FF,#A88FE8)}
+html[data-skin=braid] .brand-block .brand{letter-spacing:.08em}
+html[data-skin] body{background:var(--bg);color:var(--tx,var(--ink));font-family:var(--sans)}
+html[data-skin=amniscient] body{font-stretch:var(--w-cond,80%)}
+html[data-skin=amniscient] header,html[data-skin=amniscient] .header{
+background:var(--sunk)!important;backdrop-filter:none;-webkit-backdrop-filter:none;border:1px solid var(--rule)!important;border-radius:4px!important;box-shadow:none}
+html[data-skin=amniscient] .title,html[data-skin=amniscient] .wm,html[data-skin=amniscient] .logo,html[data-skin=amniscient] .logo b,html[data-skin=amniscient] #sidebar .brand h1,html[data-skin=amniscient] header h1,html[data-skin=amniscient] .header h1,html[data-skin=amniscient] .brand h1,html[data-skin=amniscient] .brand-block .brand{
+font-family:var(--sans);font-stretch:80%;font-weight:700;text-transform:uppercase;letter-spacing:.14em;background:none;color:var(--ink);text-shadow:none;-webkit-background-clip:unset;background-clip:unset}
+html[data-skin=amniscient] .title,html[data-skin=amniscient] .logo b,html[data-skin=amniscient] header h1 span,html[data-skin=amniscient] .header h1 span{color:var(--you)}
+html[data-skin=amniscient] .widget,html[data-skin=amniscient] .bubble,html[data-skin=amniscient] .status .pill,html[data-skin=amniscient] .toast{box-shadow:none!important;text-shadow:none}
+html[data-skin=amniscient] .widget::before{opacity:.35}
+html[data-skin=amniscient] button,.skin-btn{border-radius:4px}
+html[data-skin] header,html[data-skin] .header{flex-wrap:nowrap!important;position:relative;z-index:20;overflow-x:auto;overflow-y:hidden;flex-shrink:0;min-height:48px}
+html[data-skin] #app{max-width:none!important;width:100%!important;margin:0!important;padding:8px 10px!important;gap:8px!important;height:100dvh!important;min-height:0}
+html[data-skin] .title,html[data-skin] .wm,html[data-skin] .logo,html[data-skin] .logo b,html[data-skin] #sidebar .brand h1,html[data-skin] header h1 span,html[data-skin] .header h1 span,html[data-skin] .brand h1,html[data-skin] .brand-block .brand{
+background:none!important;-webkit-background-clip:unset!important;background-clip:unset!important;color:var(--you,var(--acc,#C89B4E))!important;-webkit-text-fill-color:var(--you,var(--acc,#C89B4E))!important;text-shadow:none!important}
+html[data-skin] .status{flex-wrap:nowrap;overflow-x:auto;min-width:0}
+html[data-skin] #composer,html[data-skin] .input-area,html[data-skin] .status-bar{flex-shrink:0}
+html[data-skin] #log,html[data-skin] .messages,html[data-skin] .chat-col,html[data-skin] #chat-wrap{min-height:0}
+html[data-skin] .app{height:100dvh;min-height:0}
+html[data-skin] .header-actions{flex-wrap:nowrap;overflow-x:auto;min-width:0}
+html[data-skin=amniscient] #send,html[data-skin=amniscient] button.primary,html[data-skin=amniscient] .send-btn,html[data-skin=amniscient] .btn-primary{box-shadow:none!important}
+.hdr-links{display:inline-flex;align-items:center;gap:10px;flex-shrink:0;font:600 11px/1 var(--sans,var(--font),system-ui);letter-spacing:.06em;text-transform:uppercase}
+.hdr-links a{color:var(--mut,var(--mute,#9aa3b2));text-decoration:none}
+.hdr-links a:hover{color:var(--you,var(--acc,#C89B4E))}
+.skin-switch{display:inline-flex;align-items:center;gap:0;border:1px solid var(--rule,var(--line,#2a3140));border-radius:var(--radius,8px);overflow:hidden;flex-shrink:0;position:relative;z-index:21;pointer-events:auto}
+.skin-btn{appearance:none;border:0;border-right:1px solid var(--rule,var(--line,#2a3140));background:var(--sunk,var(--panel2,#1c212b));color:var(--mut,var(--mute,#9aa3b2));font:600 10px/1 var(--sans,var(--font),system-ui);letter-spacing:.12em;text-transform:uppercase;padding:7px 10px;cursor:pointer;pointer-events:auto}
+.skin-btn:last-child{border-right:0}
+.skin-btn:hover{color:var(--ink,var(--fg,#eef1f6));background:var(--surface,var(--panel,#161a22))}
+.skin-btn.on{color:var(--you-ink,var(--bg,#0b0d12));background:var(--you,var(--acc,#5A48B0))}
+html[data-skin=amniscient] .skin-switch,html[data-skin=amniscient] .skin-btn{border-radius:0}
+html[data-skin=amniscient] .skin-switch{border-radius:4px}
+html[data-skin=amniscient] .bub,html[data-skin=amniscient] .iconbtn,html[data-skin=amniscient] .tab,html[data-skin=amniscient] textarea,html[data-skin=amniscient] .send,html[data-skin=amniscient] .drawer,html[data-skin=amniscient] .ag,html[data-skin=amniscient] .dbtn,html[data-skin=amniscient] .ord,html[data-skin=amniscient] .m,html[data-skin=amniscient] .bar input,html[data-skin=amniscient] .bar textarea,html[data-skin=amniscient] .bar button,html[data-skin=amniscient] pre,html[data-skin=amniscient] .badge,html[data-skin=amniscient] .chip span,html[data-skin=amniscient] .learn span,html[data-skin=amniscient] #tabs button,html[data-skin=amniscient] .action,html[data-skin=amniscient] .ex,html[data-skin=amniscient] .wizard-card,html[data-skin=amniscient] #input,html[data-skin=amniscient] button.primary,html[data-skin=amniscient] button.icon-btn,html[data-skin=amniscient] .chip,html[data-skin=amniscient] .panel,html[data-skin=amniscient] .brand-logo,html[data-skin=amniscient] .status-pill,html[data-skin=amniscient] .msg{border-radius:4px}
+html[data-skin=amniscient] .brand-logo,html[data-skin=amniscient] .dot,html[data-skin=amniscient] .status-pill{box-shadow:none!important}

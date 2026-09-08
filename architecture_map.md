@@ -1,4 +1,14 @@
-# Amni-Code Architecture Map v2.8.0
+# Amni-Code Architecture Map v2.9.0
+## Ports
+- **UI / Axum:** default **3030** (`AMNI_CODE_PORT` env override). Haven owns **3000** — do not reclaim it.
+- Health: `GET http://127.0.0.1:3030/health`
+## v2.9.0 subscription CLI seats + rich markdown
+- `src/cli_seats.rs`: `SEATS` table (id/exe/label/hint/get/paths/models), `find` (env override > PATH > known paths), `argv` (per-seat flags; plan/edit/auto mapping), `run` (spawn in cwd, stdin prompt, streamed `thinking`, `finalize` parses stream-json/JSON-lines or strips codex chrome), Claude session pins keyed by Amni session id. Unit tests in-module.
+- `main.rs`: `mod cli_seats`; `agent_loop_stream` branches to `cli_seats::run` when `config.provider` is a seat (no tool loop, no API key); `GET /api/seats`; `/api/models` returns seat models; defaults `("default","")` for seats; `AMNI_CODE_NO_OPEN` skips `open::that`.
+- `static/index.html`: `CORE_PROVIDERS` seats carry `cli:true`; `<optgroup>` "Subscription CLIs"; `seatStatus()` renders `/api/seats`; `case 'thinking'` streams text into the bubble; `renderMd` = Braid md IIFE (blocks/inl/hl/table/fence+copy) with `.cb`/`.tw`/`.hl-*` CSS on `--accent/--bg/--border/--text2`.
+- Typography (site match): `:root --site-sans/--site-serif/--site-mono/--w-cond/--w-mid`; `.msg` serif 15.5px/1.62; h1/h2 Archivo 700 stretch 90%; h3/h4/th/.cb-bar = site eyebrow (condensed uppercase tracked); `serve_sourceserif` route. Reference: `amni-scient-site/css/style.css` (body 16px/1.62, `--font-sans` Archivo, `--font-serif` Source Serif 4, `--w-cond` 80%, `--w-mid` 90%).
+- Control system (v2.9.0, LAST block in `<style>` so it wins): `--ctl-h/--ctl-r/--eyebrow`; header 54px single row (`.hdr-links` hidden <1180px, `.cwd-info` <980px); `#theme-toggle` hidden next to `.skin-switch`; composer ghost stop/steer + accent send; `body` column flex + `body>.app{flex:1}` keeps `#status-bar` on screen; selects `appearance:none` with CSS chevron. Add new controls by reusing these tokens, never new colors.
+- Not a seat concern: the 19 built-in tools, checkpoints, slash commands still apply to API providers only; a seat turn edits files through the CLI itself, the fs-events watcher refreshes the tree.
 ## v2.8.0 best-coding-platform sprint (9 tested features, cargo test 0->9)
 First-class git tools (git_status/diff/add/commit/log) · plan/edit/autonomous operating modes (Config.mode + is_mutating_tool plan gate in agent_loop_stream) · verify/test loop (run_tests + detect_test_command) · slash commands (parse_slash/handle_slash: /test /commit /diff /log /review /plan /edit /auto /help) · run_lint (detect_lint_command) · @-file mentions (extract_mentions/resolve_mentions/session_cwd) · session checkpoints (Checkpoint + snapshot_files/restore_files + /api/checkpoint|checkpoints|restore) · multi_edit (apply_multi_edit, atomic) · run_format (detect_format_command). Tests in `mod git_tool_tests`. The README feature table + changelog v2.8.0 cover the user-facing surface.
 ## Overview
@@ -24,6 +34,7 @@ src/main.rs: Axum web server + full agent engine
 - LLM integration: OpenAI-compatible API (Ollama/OpenAI/Anthropic/xAI/Google/Amni via provider config)
 - Routes: GET / (serve embedded UI), POST /api/chat (agent), GET|POST /api/config, GET /health
 - Auto-opens browser on launch
+**Dual-skin (v2.8.4):** `static/dual-skin.css` + `static/dual-skin.js` (byte-identical to Amni-Ai). Live UI + installer both switch Braid | Amniscient + Dark/Light (`amni_skin`, `amni-theme`). `/health` returns `{ok,version,port}`; UI `sb-ver` live. Pass complete.
 static/index.html: Self-contained single-file UI (HTML+CSS+JS inline)
 - Chat interface with markdown rendering
 - Code-change diff visualizer (side panel, auto-opens on file changes)
@@ -48,6 +59,9 @@ Eliminates Python dependency entirely — model downloads use HuggingFace HTTP A
 ## Data Flow
 User input -> POST /api/chat -> agent_loop -> llm_call (OpenAI-compatible or Google direct) -> tool execution -> repeat until LLM returns text-only -> JSON response with message + tool_calls array
 ## Config Providers
+- 7 vendors (v2.8.7+): Adam, xAI, OpenAI, Anthropic, Google, Ollama, Custom.
+- Adam models (v2.8.8): `adam:3b` and `adam:8b` pinned first; live bake alias `adam:granite-gf17` still accepted.
+- Header links (v2.8.8): amni-scient.com, /amni-code, ko-fi.com/amnibro.
 - ollama: localhost:11434 (default, no key needed, import GGUF via "from" field)
 - amni: 127.0.0.1:7700 (Amni-AI web server, exposes /health, /v1/models, /v1/chat/completions)
 - openai: api.openai.com (Bearer token)

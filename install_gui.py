@@ -23,7 +23,7 @@ import os
 class GUInstaller:
     def __init__(self):
         self.root = tk.Tk()
-        self.root.title("Amni-Code Agent Installer v2.2.0")
+        self.root.title("Amni-Code Agent Installer v2.8.4")
         self.root.geometry("700x600")
         self.root.resizable(True, True)
         
@@ -152,7 +152,7 @@ class GUInstaller:
         title_label.grid(row=1, column=0, pady=(0, 5))
         
         # Subtitle
-        subtitle_label = ttk.Label(header_frame, text="v2.2.0 • Intelligent AI Development Assistant",
+        subtitle_label = ttk.Label(header_frame, text="v2.8.4 • Intelligent AI Development Assistant",
                                   style='Status.TLabel')
         subtitle_label.grid(row=2, column=0)
 
@@ -513,7 +513,7 @@ class GUInstaller:
     def run_installation(self):
         try:
             self.log("=" * 50)
-            self.log("   Amni-Code Agent Installer v2.2.0")
+            self.log("   Amni-Code Agent Installer v2.8.4")
             self.log("=" * 50)
             self.log("")
 

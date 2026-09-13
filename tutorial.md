@@ -1,6 +1,6 @@
 # Amni-Code Tutorial
 
-Amni-Code is an open-source AI coding agent built in Rust. It gives an LLM real tools to read, write, and edit files, run shell commands, and search your codebase — all from a browser UI at `localhost:3000`.
+Amni-Code is an open-source AI coding agent built in Rust. It gives an LLM real tools to read, write, and edit files, run shell commands, and search your codebase — all from a browser UI at `localhost:3030`.
 
 ## One-Click Install (Windows)
 
@@ -17,7 +17,7 @@ This will:
 2. Prompt you for API keys (xAI Grok, OpenAI, Anthropic — press Enter to skip any)
 3. Install Rust if needed
 4. Build the application
-5. Launch it at http://localhost:3000
+5. Launch it at http://localhost:3030
 
 ### Already cloned? Just run:
 ```bash
@@ -59,7 +59,7 @@ Amni-Code defaults to **xAI Grok**. You need at least one API key from a support
 The quickstart script and GUI installer both prompt for API keys. They're saved to a `.env` file (gitignored).
 
 ### After Installation
-1. Open http://localhost:3000
+1. Open http://localhost:3030
 2. Click the **⚙ Settings** button (top right)
 3. Select your **Provider** (xAI, OpenAI, Anthropic, Ollama)
 4. Enter your **API Key**
@@ -128,7 +128,7 @@ The agent operates in the directory shown in Settings. Change it to point at any
 
 ## Troubleshooting
 
-**Port 3000 busy:** Another app is using port 3000. Kill it or change the port in `src/main.rs` and rebuild.
+**Port 3030 busy:** Another app is using port 3030. Kill it, or set `AMNI_CODE_PORT` to a free port and relaunch. (Haven uses **3000** — Amni-Code intentionally does not.)
 
 **Build fails:** Make sure Rust is installed: `rustup --version`. If not, run `quickstart.bat` or install from https://rustup.rs.
 

@@ -1,14 +1,15 @@
 @echo off
 setlocal
 title Amni-Code Local Server
-set PORT=8787
+set OLLAMA_PORT=11434
+set LOCAL_PORT=8787
 
 echo =======================================================
-echo   Amni-Code - Local Model Server (Port %PORT%)
+echo   Amni-Code - Local Model Server
 echo =======================================================
 echo.
-echo This script helps fire up a local AI model for Amni-Code.
-echo By default, custom local endpoints might expect port %PORT%.
+echo Ollama uses :%OLLAMA_PORT%. llama-cpp local provider uses :%LOCAL_PORT%.
+echo Adam / Amni-Ai is :7700. Amni-Code UI is :3030.
 echo.
 
 :MENU
@@ -37,10 +38,10 @@ if %ERRORLEVEL% neq 0 (
     goto MENU
 )
 echo.
-echo Setting OLLAMA_HOST to 127.0.0.1:%PORT% and starting Ollama...
+echo Starting Ollama on 127.0.0.1:%OLLAMA_PORT% ...
 echo (Note: Make sure your desired model is pulled, e.g., 'ollama pull qwen2.5-coder:7b')
 echo.
-set OLLAMA_HOST=127.0.0.1:%PORT%
+set OLLAMA_HOST=127.0.0.1:%OLLAMA_PORT%
 ollama serve
 pause
 cls
@@ -84,8 +85,8 @@ echo Installing llama-cpp-python server package if missing...
 pip install "llama-cpp-python[server]" -q
 
 echo.
-echo Starting server on port %PORT% with models\%MODEL_FILE% ...
-python -m llama_cpp.server --host 127.0.0.1 --port %PORT% --model "models\%MODEL_FILE%"
+echo Starting llama-cpp on port %LOCAL_PORT% with models\%MODEL_FILE% ...
+python -m llama_cpp.server --host 127.0.0.1 --port %LOCAL_PORT% --model "models\%MODEL_FILE%"
 pause
 cls
 goto MENU

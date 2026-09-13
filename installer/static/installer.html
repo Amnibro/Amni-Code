@@ -1,24 +1,27 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<!DOCTYPE html><html lang="en" data-skin="braid" data-theme="dark"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#0A0B0E">
 <title>Amni-Code Installer</title>
+<link rel="stylesheet" href="/assets/dual-skin.css">
+<script src="/assets/dual-skin.js"></script>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 :root{--accent:#00d4ff;--accent2:#7c3aed;--bg:#0a0a0f;--card:rgba(15,15,25,0.85);--glass:rgba(255,255,255,0.05);--text:#e4e4e7;--dim:#71717a;--ok:#22c55e;--err:#ef4444;--warn:#f59e0b}
-body{font-family:'Segoe UI',system-ui,-apple-system,sans-serif;background:var(--bg);color:var(--text);overflow:hidden;height:100vh;width:100vw}
+html[data-skin]{--card:var(--surface);--dim:var(--mut);--text:var(--ink)}
+body{font-family:var(--sans,'Segoe UI'),system-ui,-apple-system,sans-serif;background:var(--bg);color:var(--text);overflow:hidden;height:100vh;width:100vw}
 canvas#gl{position:fixed;top:0;left:0;width:100%;height:100%;z-index:0}
 .overlay{position:fixed;top:0;left:0;width:100%;height:100%;z-index:1;background:radial-gradient(ellipse at 50% 0%,rgba(0,212,255,0.08),transparent 60%)}
 .app{position:relative;z-index:2;display:flex;flex-direction:column;height:100vh;padding:24px 40px}
 .header{display:flex;align-items:center;gap:16px;margin-bottom:24px}
-.logo{width:48px;height:48px;border-radius:12px;background:linear-gradient(135deg,var(--accent),var(--accent2));display:flex;align-items:center;justify-content:center;font-size:24px;font-weight:700;color:#fff;box-shadow:0 0 30px rgba(0,212,255,0.3)}
+.brand-logo{width:48px;height:48px;border-radius:var(--radius,12px);background:var(--you);color:var(--you-ink,#fff);display:flex;align-items:center;justify-content:center;font-size:24px;font-weight:700;box-shadow:none}
 .header h1{font-size:22px;font-weight:600;letter-spacing:-0.5px}
 .header span{font-size:13px;color:var(--dim);margin-left:auto}
 .steps{display:flex;gap:0;margin-bottom:28px;position:relative}
 .steps::before{content:'';position:absolute;top:50%;left:24px;right:24px;height:2px;background:rgba(255,255,255,0.08);transform:translateY(-50%)}
 .step-dot{width:48px;height:48px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:600;background:var(--card);border:2px solid rgba(255,255,255,0.1);position:relative;z-index:1;transition:all 0.4s ease;flex:1}
-.step-dot.active{border-color:var(--accent);color:var(--accent);box-shadow:0 0 20px rgba(0,212,255,0.25)}
+.step-dot.active{border-color:var(--accent);color:var(--accent);box-shadow:none}
 .step-dot.done{border-color:var(--ok);background:rgba(34,197,94,0.15);color:var(--ok)}
 .step-label{position:absolute;top:54px;left:50%;transform:translateX(-50%);font-size:11px;color:var(--dim);white-space:nowrap;transition:color 0.3s}
 .step-dot.active .step-label{color:var(--accent)}
-.card{background:var(--card);border:1px solid rgba(255,255,255,0.06);border-radius:16px;padding:32px;backdrop-filter:blur(20px);flex:1;overflow-y:auto;position:relative}
+.card{background:var(--card);border:1px solid var(--rule,rgba(255,255,255,0.06));border-radius:var(--radius,16px);padding:32px;backdrop-filter:saturate(180%) blur(20px);flex:1;overflow-y:auto;position:relative}
 .page{display:none;animation:fadeIn 0.4s ease}
 .page.active{display:block}
 @keyframes fadeIn{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
@@ -33,7 +36,7 @@ canvas#gl{position:fixed;top:0;left:0;width:100%;height:100%;z-index:0}
 .prereq .info{flex:1}
 .prereq .info .name{font-weight:600;font-size:14px}
 .prereq .info .ver{font-size:12px;color:var(--dim)}
-.prereq .dl-btn{padding:6px 14px;border-radius:8px;background:var(--accent);color:#000;font-size:12px;font-weight:600;border:none;cursor:pointer;transition:transform 0.2s}
+.prereq .dl-btn{padding:6px 14px;border-radius:var(--radius,8px);background:var(--accent);color:var(--you-ink,#000);font-size:12px;font-weight:600;border:none;cursor:pointer;transition:transform 0.2s}
 .prereq .dl-btn:hover{transform:scale(1.05)}
 .opt-group{margin-bottom:18px}
 .opt-group label{font-size:13px;font-weight:500;display:block;margin-bottom:8px;color:var(--dim)}
@@ -46,7 +49,7 @@ canvas#gl{position:fixed;top:0;left:0;width:100%;height:100%;z-index:0}
 .opt-row .opt-size{font-size:12px;color:var(--dim);font-family:'Consolas',monospace}
 .install-mode{display:flex;gap:12px;margin-bottom:20px}
 .mode-card{flex:1;padding:18px;border-radius:12px;background:var(--glass);border:2px solid transparent;cursor:pointer;transition:all 0.3s;text-align:center}
-.mode-card.selected{border-color:var(--accent);background:rgba(0,212,255,0.05)}
+.mode-card.selected{border-color:var(--accent);background:var(--you-dim,rgba(0,212,255,0.05))}
 .mode-card h3{font-size:14px;margin-bottom:4px}
 .mode-card p{font-size:12px;color:var(--dim)}
 .install-dir{display:flex;gap:10px;margin-bottom:16px}
@@ -68,7 +71,11 @@ canvas#gl{position:fixed;top:0;left:0;width:100%;height:100%;z-index:0}
 .footer{display:flex;justify-content:flex-end;gap:12px;margin-top:20px;padding-top:16px}
 .btn{padding:10px 24px;border-radius:10px;font-size:14px;font-weight:600;border:none;cursor:pointer;transition:all 0.2s;font-family:inherit}
 .btn:hover{transform:translateY(-1px)}
-.btn-primary{background:linear-gradient(135deg,var(--accent),var(--accent2));color:#fff;box-shadow:0 4px 16px rgba(0,212,255,0.25)}
+.btn-primary{background:var(--accent);color:var(--you-ink,#fff);box-shadow:none}
+html[data-skin=amniscient] canvas#gl,html[data-theme=light] canvas#gl{display:none}
+html[data-skin=amniscient] .overlay,html[data-theme=light] .overlay{background:none}
+html[data-skin=amniscient] .card{backdrop-filter:none;-webkit-backdrop-filter:none}
+html[data-skin=amniscient] .brand-logo,html[data-skin=amniscient] .card,html[data-skin=amniscient] .prereq,html[data-skin=amniscient] .opt-row,html[data-skin=amniscient] .mode-card,html[data-skin=amniscient] .btn,html[data-skin=amniscient] .install-dir input,html[data-skin=amniscient] .log,html[data-skin=amniscient] .err-card,html[data-skin=amniscient] .step-dot{border-radius:4px}
 .btn-ghost{background:transparent;color:var(--dim);border:1px solid rgba(255,255,255,0.1)}
 .btn-ghost:hover{color:var(--text);border-color:rgba(255,255,255,0.2)}
 .btn-ok{background:var(--ok);color:#000}
@@ -79,9 +86,10 @@ canvas#gl{position:fixed;top:0;left:0;width:100%;height:100%;z-index:0}
 <div class="overlay"></div>
 <div class="app">
 <div class="header">
-<div class="logo">A</div>
-<div><h1>Amni-Code Installer</h1></div>
-<span id="ver">v2.2.0</span>
+<div class="brand-logo">A</div>
+<div><h1 class="title wm">Amni-Code</h1></div>
+<div class="skin-switch" role="group" aria-label="Skin"><button type="button" class="skin-btn" id="amni-skin-braid" onclick="AmniSkin.set('braid')">Braid</button><button type="button" class="skin-btn" id="amni-skin-amniscient" onclick="AmniSkin.set('amniscient')">Amniscient</button><button type="button" class="skin-btn" id="amni-tone-toggle" onclick="AmniSkin.toggleTone()">DARK</button></div>
+<span id="ver">v2.8.3</span>
 </div>
 <div class="steps" id="steps">
 <div class="step-dot active" data-step="0">1<span class="step-label">Welcome</span></div>
@@ -238,7 +246,7 @@ if(btn)btn.style.display=ok?'none':'';
 };
 setP('pr-rust',prereqs.rust,prereqs.rust_ver);
 setP('pr-git',prereqs.git,prereqs.git_ver);
-$('#ver').textContent=`v2.2.0 • ${prereqs.os}/${prereqs.arch}`;
+$('#ver').textContent=`v2.8.3 • ${prereqs.os}/${prereqs.arch}`;
 if(!prereqs.rust&&!prereqs.git)$('#prereq-note').textContent='Install the missing tools above, then click "Next". Rust is only required for "Build from Source" mode.';
 else if(!prereqs.rust)$('#prereq-note').textContent='Rust is optional — you can use "Pre-built Binary" mode without it.';
 else $('#prereq-note').textContent='All prerequisites met!';

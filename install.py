@@ -319,7 +319,7 @@ class AmniCodeInstaller:
 
         print("\nTo run Amni-Code:")
         print("1. Execute: target/release/amni-code.exe")
-        print("2. Open http://localhost:3000 in your browser")
+        print("2. Open http://localhost:3030 in your browser")
 
         if self.has_amd and not self.has_hip:
             print("\nFor AMD users: Complete HIP installation and restart before running.")

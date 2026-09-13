@@ -7,7 +7,7 @@ title Amni-Code Installer
 echo.
 echo   !E![95m╔════════════════════════════════════════════════╗!E![0m
 echo   !E![95m║!E![97;1m           ⚡  A M N I - C O D E                !E![0;95m║!E![0m
-echo   !E![95m║!E![90m              Installer  v2.2.0                  !E![0;95m║!E![0m
+echo   !E![95m║!E![90m              Installer  v2.8.4                  !E![0;95m║!E![0m
 echo   !E![95m╚════════════════════════════════════════════════╝!E![0m
 echo.
 

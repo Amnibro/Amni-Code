@@ -1,4 +1,4 @@
-use axum::{extract::Json as JBody,response::{sse::{Event as SE,KeepAlive},Html,Json,Sse},routing::{get,post},Router};
+use axum::{extract::Json as JBody,http::{header,HeaderValue,StatusCode},response::{sse::{Event as SE,KeepAlive},Html,IntoResponse,Json,Response,Sse},routing::{get,post},Router};
 use serde::{Deserialize,Serialize};
 use std::{env,net::SocketAddr,path::PathBuf,process::Command};
 use tokio::sync::mpsc;
@@ -15,6 +15,17 @@ fn cmd_ver(c:&str,a:&str)->(bool,String){
         .unwrap_or((false,String::new()))
 }
 async fn ui()->Html<&'static str>{Html(UI)}
+fn _asset(body:&'static [u8],ct:&'static str)->Response{
+    let mut r=Response::new(body.to_vec().into());
+    *r.status_mut()=StatusCode::OK;
+    r.headers_mut().insert(header::CONTENT_TYPE,HeaderValue::from_static(ct));
+    r.headers_mut().insert(header::CACHE_CONTROL,HeaderValue::from_static("no-store"));
+    r
+}
+async fn serve_dual_css()->impl IntoResponse{_asset(include_str!("../../static/dual-skin.css").as_bytes(),"text/css; charset=utf-8")}
+async fn serve_dual_js()->impl IntoResponse{_asset(include_str!("../../static/dual-skin.js").as_bytes(),"application/javascript; charset=utf-8")}
+async fn serve_archivo()->impl IntoResponse{_asset(include_bytes!("../../static/fonts/archivo-var.woff2"),"font/woff2")}
+async fn serve_archivo_ext()->impl IntoResponse{_asset(include_bytes!("../../static/fonts/archivo-var-ext.woff2"),"font/woff2")}
 async fn prereqs()->Json<Prereqs>{
     let(rust,rust_ver)=cmd_ver("rustc","--version");
     let(git,git_ver)=cmd_ver("git","--version");
@@ -186,6 +197,10 @@ async fn open_link(JBody(url):JBody<serde_json::Value>)->Json<bool>{
 async fn main(){
     let app=Router::new()
         .route("/",get(ui))
+        .route("/assets/dual-skin.css",get(serve_dual_css))
+        .route("/assets/dual-skin.js",get(serve_dual_js))
+        .route("/assets/fonts/archivo-var.woff2",get(serve_archivo))
+        .route("/assets/fonts/archivo-var-ext.woff2",get(serve_archivo_ext))
         .route("/api/prereqs",get(prereqs))
         .route("/api/install",post(install))
         .route("/api/open",post(open_link));

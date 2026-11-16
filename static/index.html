@@ -347,7 +347,8 @@ a:hover{opacity:.8}
 .settings-panel #dir-tree,.settings-panel #dir-tree *{font-family:var(--site-sans);font-size:13px}
 body{display:flex;flex-direction:column}body>.app{flex:1;min-height:0;height:auto}
 </style>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.44.0/min/vs/loader.min.js"></script>
+<script src="/vendor/monaco/vs/loader.js"></script>
+<link rel="stylesheet" href="/assets/ui.css">
 <script>
 const I18N={en:{agent_mode:"Agent mode",agent_mode_desc:"Plan proposes without touching files. Edit applies changes as it goes. Autonomous runs everything without asking.",explorer:"Explorer",welcome_title:"Welcome to Amni-Code",welcome_desc:"Your AI coding agent. Type anything below — ask it to build features, fix bugs, create files, run commands, or explain code. It will do the work for you.",welcome_hint:"Click ⚙ to configure your AI provider (Adam / Amni-AI local by default)",prompt_api:"Build an API",prompt_debug:"Debug code",prompt_explain:"Explain code",prompt_scaffold:"Scaffold project",settings:"Settings",provider:"Provider",model:"Model",api_key:"API Key",base_url:"Base URL",working_dir:"Working Directory",auto_approve:"Auto-approve all agent actions",auto_approve_desc:"When off, you'll see what the agent wants to do before it executes. When on, it acts autonomously.",code_changes:"Code Changes",undo:"Undo",accept:"Accept",recent_chats:"Recent Chats",clear_all:"Clear All",no_recent:"No recent chats",send:"Send",new_chat:"New Chat",toggle_editor:"Toggle Editor",toggle_diff:"Toggle Diff Panel",save_file:"Save File",quick_open:"Quick Open File",toggle_settings:"Toggle Settings",toggle_theme:"Toggle Theme",cycle_accent:"Cycle Accent Color",chat_history:"Chat History",ai_suggestion:"AI Suggestion",close_tab:"Close Active Tab",next_tab:"Next Tab",prev_tab:"Previous Tab",focus_chat:"Focus Chat Input",undo_changes:"Undo Changes",accept_changes:"Accept Changes",search_models:"Search GGUF models...",download:"Download",searching:"Searching...",no_models_found:"No GGUF models found",loading:"Loading...",ready_install:"Ready to install...",up_folder:"Up",no_subdirs:"No subdirectories",saved:"Saved",save_failed:"Save failed - check connection.",open_file_first:"Open a file first!",no_changes:"No changes yet",changes_accepted:"Changes accepted",reverted:"Reverted",no_changes_undo:"No changes to undo",undo_failed:"Undo failed",undo_confirm:"Undo all changes from this session?",clear_confirm:"Clear all chat history?",connection_error:"Connection error — is the server running? Check Settings for provider config.",generation_interrupted:"Generation interrupted.",error_prefix:"Error",placeholder_chat:"Ask Amni-Code to build, fix, or explain anything...",placeholder_cmd:"Type a command...",go_to_file:"Go to file...",language:"Language",split_view:"Split View",close_pane:"Close Pane",pane:"Pane",model_dir:"Local Model Directory",download_hf:"Download Models from Hugging Face",starting_server:"Starting Inference Server",server_launch_desc:"Launching Amni-AI — this may take 15-30 seconds on first start.",dismiss:"Dismiss",start_server:"Start Server",dark:"DARK",light:"LIGHT",errors:"errors",plaintext:"Plaintext",from_env:"(from ENV)",not_needed:"Not needed for Ollama"},
 es:{explorer:"Explorador",welcome_title:"Bienvenido a Amni-Code",welcome_desc:"Tu agente de código IA. Escribe cualquier cosa — pídele construir funciones, corregir errores, crear archivos o explicar código.",welcome_hint:"Haz clic en ⚙ para configurar tu proveedor de IA",prompt_api:"Crear una API",prompt_debug:"Depurar código",prompt_explain:"Explicar código",prompt_scaffold:"Crear proyecto",settings:"Ajustes",provider:"Proveedor",model:"Modelo",api_key:"Clave API",base_url:"URL Base",working_dir:"Directorio de trabajo",auto_approve:"Auto-aprobar acciones del agente",auto_approve_desc:"Cuando está desactivado, verás lo que el agente quiere hacer. Cuando está activado, actúa autónomamente.",code_changes:"Cambios de Código",undo:"Deshacer",accept:"Aceptar",recent_chats:"Chats Recientes",clear_all:"Borrar Todo",no_recent:"Sin chats recientes",send:"Enviar",new_chat:"Nuevo Chat",toggle_editor:"Alternar Editor",toggle_diff:"Alternar Panel Diff",save_file:"Guardar Archivo",quick_open:"Abrir Rápido",toggle_settings:"Alternar Ajustes",toggle_theme:"Alternar Tema",cycle_accent:"Cambiar Color Acento",chat_history:"Historial",ai_suggestion:"Sugerencia IA",close_tab:"Cerrar Pestaña",next_tab:"Siguiente Pestaña",prev_tab:"Pestaña Anterior",focus_chat:"Enfocar Chat",undo_changes:"Deshacer Cambios",accept_changes:"Aceptar Cambios",search_models:"Buscar modelos GGUF...",download:"Descargar",searching:"Buscando...",no_models_found:"No se encontraron modelos GGUF",loading:"Cargando...",placeholder_chat:"Pide a Amni-Code construir, corregir o explicar...",placeholder_cmd:"Escribe un comando...",go_to_file:"Ir a archivo...",language:"Idioma",split_view:"Vista Dividida",close_pane:"Cerrar Panel",pane:"Panel",dark:"OSCURO",light:"CLARO",errors:"errores",plaintext:"Texto plano"},
@@ -420,7 +421,7 @@ document.querySelectorAll('[data-i18n-title]').forEach(el=>{const k=el.getAttrib
     </div>
     <div class="input-area">
       <div class="input-wrap">
-        <textarea id="input" rows="1" data-i18n-placeholder="placeholder_chat" placeholder="Ask Amni-Code to build, fix, or explain anything..."></textarea>
+        <textarea id="input" rows="1" data-i18n-placeholder="placeholder_chat" placeholder="Ask Amni-Code to build, fix, or explain anything…  (Enter to send, Shift+Enter for a new line)"></textarea>
         <button class="interrupt-btn" id="interrupt" title="Stop generation" disabled>&#9632;</button>
         <button class="steer-btn" id="steer" title="Inject context mid-generation (type in input first)" disabled>&#9654;</button>
         <button class="send-btn" id="send" title="Send">
@@ -1021,11 +1022,11 @@ const res=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'applic
               if(data.text)updateThinking(data.text);
               break;
             case 'tool_start':
-              updateThinking(data.tool + '...');
+              if(window.AmniLive) AmniLive.start(data); else updateThinking(data.tool + '...');
               break;
             case 'tool_result':
               allTools.push(data);
-              updateThinking(data.tool + ' done (' + allTools.length + ' actions)');
+              if(window.AmniLive) AmniLive.end(data); else updateThinking(data.tool + ' done (' + allTools.length + ' actions)');
               if(data.tool === 'write_file' || data.tool === 'edit_file') parseDiff(data);
               break;
             case 'message':
@@ -1037,7 +1038,7 @@ const res=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'applic
               break;
             case 'error':
               removeThinking();
-              addMsg('system', 'Error: ' + (data.error || 'Unknown'));
+              addMsg('system error', (data.error || 'Unknown error').replace(/^Error: /,''));
               setGenerating(false);
               inputEl.focus();
               return;
@@ -1123,8 +1124,8 @@ async function loadConfig(){
 if($('#cfg-dir'))$('#cfg-dir').value=_cwd;if(c.model_dir&&$('#cfg-model-dir'))$('#cfg-model-dir').value=c.model_dir;if($('#cfg-auto')){if(c.auto_approve)$('#cfg-auto').classList.add('on');else $('#cfg-auto').classList.remove('on')}if($('#cfg-mode'))$('#cfg-mode').value=c.mode||'edit';if(c.api_key&&$('#key-src'))$('#key-src').textContent='(from ENV)';await loadModels(c.model);loadDirs(_cwd);loadSidebar(_cwd);
   } catch(e){console.error('loadConfig:',e);}
 }
-const MODEL_LABELS={'adam:3b':'Adam 3B — Granite 4.1','adam:8b':'Adam 8B — Granite 4.1','adam:granite-gf17':'Adam (live bake)','adam:granite-3b':'Adam 3B — Granite 4.1','adam:granite-8b':'Adam 8B — Granite 4.1'};
-const CORE_PROVIDERS={amni:{url:'http://127.0.0.1:7700',key:false,models:['adam:3b','adam:8b']},xai:{url:'https://api.x.ai',key:true,models:['grok-4','grok-4-1-fast-reasoning','grok-3','grok-3-mini']},openai:{url:'https://api.openai.com',key:true,models:['gpt-4o','gpt-4o-mini','gpt-4.1','o3','o4-mini']},anthropic:{url:'https://api.anthropic.com',key:true,models:['claude-sonnet-4-20250514','claude-opus-4-20250514','claude-haiku-4-20250514']},google:{url:'https://generativelanguage.googleapis.com',key:true,models:['gemini-2.5-pro','gemini-2.5-flash']},ollama:{url:'http://127.0.0.1:11434',key:false,models:[]},local:{url:'http://127.0.0.1:11434',key:true,models:[]},'claude-code':{url:'',key:false,cli:true,models:[]},codex:{url:'',key:false,cli:true,models:[]},copilot:{url:'',key:false,cli:true,models:[]},cursor:{url:'',key:false,cli:true,models:[]},'grok-cli':{url:'',key:false,cli:true,models:[]},antigravity:{url:'',key:false,cli:true,models:[]},opencode:{url:'',key:false,cli:true,models:[]}};
+const MODEL_LABELS={'adam:3b':'Adam 3B (local)','adam:8b':'Adam 8B (local)','adam:granite-gf17':'Adam (live bake)','adam:granite-3b':'Adam 3B (local)','adam:granite-8b':'Adam 8B (local)','hf.co/ibm-granite/granite-4.2-3b-GGUF':'Granite 4.2 3B (local, 128K)','hf.co/unsloth/Qwen3.8-27B-GGUF':'Qwen 3.8 27B (local, 262K)','claude-opus-5-5':'Claude Opus 5.5','claude-sonnet-5-5':'Claude Sonnet 5.5','claude-haiku-5-5':'Claude Haiku 5.5','claude-fable-5-2':'Claude Fable 5.2'};
+const CORE_PROVIDERS={amni:{url:'http://127.0.0.1:7700',key:false,models:['adam:3b','adam:8b']},xai:{url:'https://api.x.ai',key:true,cloud:true,models:['grok-4.7','grok-4.6','grok-4.5','grok-build-0.1']},openai:{url:'https://api.openai.com',key:true,cloud:true,models:['gpt-6-astra','gpt-6.1-sol','gpt-6-luna','gpt-6.1-terra']},anthropic:{url:'https://api.anthropic.com',key:true,cloud:true,models:['claude-opus-5-5','claude-sonnet-5-5','claude-haiku-5-5','claude-fable-5-2']},google:{url:'https://generativelanguage.googleapis.com',key:true,cloud:true,models:['gemini-3.8-flash','gemini-3.6-flash','gemini-3.5-flash-lite','gemini-3.1-pro-preview']},ollama:{url:'http://127.0.0.1:11434',key:false,models:['hf.co/ibm-granite/granite-4.2-3b-GGUF','hf.co/unsloth/Qwen3.8-27B-GGUF']},local:{url:'http://127.0.0.1:8080',key:true,models:[]},'claude-code':{url:'',key:false,cli:true,models:[]},codex:{url:'',key:false,cli:true,models:[]},copilot:{url:'',key:false,cli:true,models:[]},cursor:{url:'',key:false,cli:true,models:[]},'grok-cli':{url:'',key:false,cli:true,models:[]},antigravity:{url:'',key:false,cli:true,models:[]},opencode:{url:'',key:false,cli:true,models:[]}};
 let SEATS=null;
 async function seatStatus(p){
   let el=$('#seat-status');
@@ -1509,7 +1510,7 @@ function toggleEditor() {
 
 function initMonacoEditor() {
   if (monacoEditor) return;
-  require.config({ paths: { vs: 'https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.44.0/min/vs' } });
+  require.config({ paths: { vs: '/vendor/monaco/vs' } });
   window.require(['vs/editor/editor.main'], () => {
     monacoEditor = monaco.editor.create($('#monaco-container'), {
       value: '',
@@ -1970,5 +1971,6 @@ setTimeout(() => {
   }
 }, 1500);
 </script>
+<script src="/assets/ui.js"></script>
 </body>
 </html>

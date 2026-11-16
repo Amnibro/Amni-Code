@@ -1,4 +1,5 @@
 mod cli_seats;
+mod providers;
 use axum::{extract::{Query,State},http::{header,HeaderValue,StatusCode},response::{sse::{Event as SseEvent,KeepAlive,Sse},Html,IntoResponse,Json,Response},routing::{get,post},Router};use futures::StreamExt;use serde::{Deserialize,Serialize};use std::{collections::HashMap,convert::Infallible,path::{Path,PathBuf},process::Stdio,sync::{Arc,atomic::AtomicBool}};use tokio::sync::{Mutex,broadcast};use tokio_stream::wrappers::ReceiverStream;use tower_http::cors::CorsLayer;
 #[derive(Clone, Default, Serialize)]
 struct DownloadProgress {
@@ -24,105 +25,24 @@ struct Config {
     model_dir: String,
     #[serde(default)]
     mcp_servers: Vec<McpServerCfg>,
+    #[serde(default)]
+    offline: bool,
+    #[serde(default)]
+    tool_mode: String,
 }
 impl Default for Config {
     fn default() -> Self {
-        let xai_key = [
-            "XAI_API_KEY",
-            "GROK_key",
-            "xAI_key",
-            "GROK_API_KEY",
-            "XAI_KEY",
-        ]
-        .iter()
-        .find_map(|k| std::env::var(k).ok().filter(|v| !v.is_empty()))
-        .unwrap_or_default();
-        let openai_key = std::env::var("OPENAI_API_KEY").unwrap_or_default();
-        let anthropic_key = std::env::var("ANTHROPIC_API_KEY").unwrap_or_default();
-        let google_key = ["GOOGLE_AI_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY"]
-            .iter()
-            .find_map(|k| std::env::var(k).ok().filter(|v| !v.is_empty()))
-            .unwrap_or_default();
-        let deepseek_key = std::env::var("DEEPSEEK_API_KEY").unwrap_or_default();
-        let groq_key = std::env::var("GROQ_API_KEY").unwrap_or_default();
-        let mistral_key = ["MISTRAL_API_KEY", "MISTRAL_KEY"]
-            .iter()
-            .find_map(|k| std::env::var(k).ok().filter(|v| !v.is_empty()))
-            .unwrap_or_default();
-        let cohere_key = std::env::var("COHERE_API_KEY").unwrap_or_default();
-        let together_key = std::env::var("TOGETHER_API_KEY").unwrap_or_default();
-        let fireworks_key = std::env::var("FIREWORKS_API_KEY").unwrap_or_default();
-        let perplexity_key = std::env::var("PERPLEXITY_API_KEY").unwrap_or_default();
-        let openrouter_key = std::env::var("OPENROUTER_API_KEY").unwrap_or_default();
         let forced = std::env::var("AMNI_CODE_PROVIDER").ok().filter(|v| !v.is_empty());
-        let (provider, key): (&str, String) = match forced.as_deref() {
-            Some("xai") => ("xai", xai_key),
-            Some("openai") => ("openai", openai_key),
-            Some("anthropic") => ("anthropic", anthropic_key),
-            Some("google") => ("google", google_key),
-            Some("deepseek") => ("deepseek", deepseek_key),
-            Some("groq") => ("groq", groq_key),
-            Some("mistral") => ("mistral", mistral_key),
-            Some("cohere") => ("cohere", cohere_key),
-            Some("together") => ("together", together_key),
-            Some("fireworks") => ("fireworks", fireworks_key),
-            Some("perplexity") => ("perplexity", perplexity_key),
-            Some("openrouter") => ("openrouter", openrouter_key),
-            Some("ollama") => ("ollama", String::new()),
-            Some("local") => ("local", String::new()),
-            Some(p) if cli_seats::is_seat(p) => (p, String::new()),
-            _ => ("amni", String::new()),
+        let provider: String = match forced.as_deref() {
+            Some(p) if providers::provider(p).is_some() || cli_seats::is_seat(p) => p.to_string(),
+            _ => "amni".to_string(),
         };
-        let (model, base_url) = match provider {
-            "openai" => ("gpt-4o".to_string(), "https://api.openai.com".to_string()),
-            "anthropic" => (
-                "claude-sonnet-4-20250514".to_string(),
-                "https://api.anthropic.com".to_string(),
-            ),
-            "google" => (
-                "gemini-2.5-flash".to_string(),
-                "https://generativelanguage.googleapis.com".to_string(),
-            ),
-            "deepseek" => (
-                "deepseek-chat".to_string(),
-                "https://api.deepseek.com".to_string(),
-            ),
-            "groq" => (
-                "llama-3.3-70b-versatile".to_string(),
-                "https://api.groq.com".to_string(),
-            ),
-            "mistral" => (
-                "mistral-large-latest".to_string(),
-                "https://api.mistral.ai".to_string(),
-            ),
-            "cohere" => (
-                "command-r-plus".to_string(),
-                "https://api.cohere.com".to_string(),
-            ),
-            "together" => (
-                "meta-llama/Llama-3.3-70B-Instruct-Turbo".to_string(),
-                "https://api.together.xyz".to_string(),
-            ),
-            "fireworks" => (
-                "accounts/fireworks/models/llama-v3p3-70b-instruct".to_string(),
-                "https://api.fireworks.ai".to_string(),
-            ),
-            "perplexity" => (
-                "sonar-pro".to_string(),
-                "https://api.perplexity.ai".to_string(),
-            ),
-            "openrouter" => (
-                "anthropic/claude-sonnet-4".to_string(),
-                "https://openrouter.ai".to_string(),
-            ),
-            p if cli_seats::is_seat(p) => ("default".to_string(), String::new()),
-            "amni" => ("adam:granite-gf17".to_string(), "http://127.0.0.1:7700".to_string()),
-            "ollama" => (String::new(), "http://localhost:11434".to_string()),
-            "local" => (String::new(), "http://localhost:11434".to_string()),
-            _ => (
-                "grok-4-1-fast-reasoning".to_string(),
-                "https://api.x.ai".to_string(),
-            ),
+        let key = providers::env_key(&provider);
+        let (model, base_url) = if cli_seats::is_seat(&provider) {
+            ("default".to_string(), String::new())
+        } else {
+            let p = providers::provider(&provider).unwrap();
+            (providers::default_model(&provider), p.base.to_string())
         };
         let model_dir = std::env::current_dir()
             .unwrap_or_default()
@@ -132,26 +52,26 @@ impl Default for Config {
             .join("models")
             .to_string_lossy()
             .to_string();
-        let model_dir = if std::fs::metadata(&model_dir).is_ok() {
-            model_dir
-        } else {
-            String::new()
-        };
+        let model_dir = if std::fs::metadata(&model_dir).is_ok() { model_dir } else { String::new() };
         Self {
-            provider: provider.into(),
+            provider,
             model,
             api_key: key,
             base_url,
             auto_approve: false,
             mode: "edit".into(),
-            working_dir: std::env::current_dir()
-                .unwrap_or_default()
-                .to_string_lossy()
-                .into(),
+            working_dir: std::env::current_dir().unwrap_or_default().to_string_lossy().into(),
             model_dir,
             mcp_servers: Vec::new(),
+            offline: env_offline(),
+            tool_mode: String::new(),
         }
     }
+}
+static OFFLINE: AtomicBool = AtomicBool::new(false);
+fn is_offline() -> bool { OFFLINE.load(std::sync::atomic::Ordering::Relaxed) }
+fn env_offline() -> bool {
+    std::env::var("AMNI_OFFLINE").map(|v| v == "1" || v.eq_ignore_ascii_case("true")).unwrap_or(false) || std::env::args().any(|a| a == "--offline")
 }
 fn amni_base_url(base_url: &str) -> String {
     let trimmed = base_url.trim_end_matches('/');
@@ -225,10 +145,17 @@ struct ConfigReq {
     mode: Option<String>,
     working_dir: Option<String>,
     model_dir: Option<String>,
+    offline: Option<bool>,
+    tool_mode: Option<String>,
 }
 #[derive(Serialize)]
 struct ModelsRes {
     models: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    source: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error: Option<String>,
+    offline_capable: bool,
 }
 #[derive(Serialize)]
 struct DirsRes {
@@ -829,7 +756,7 @@ async fn exec_web_fetch(args: &serde_json::Value) -> (String, String) {
     if is_private_url(url) {
         return ("Error: Cannot fetch private/local URLs".into(), "error".into());
     }
-    let client = reqwest::Client::builder().timeout(std::time::Duration::from_secs(15)).user_agent("Amni-Code/2.0").build().unwrap_or_default();
+    let client = reqwest::Client::builder().timeout(std::time::Duration::from_secs(15)).user_agent(concat!("Amni-Code/", env!("CARGO_PKG_VERSION"))).build().unwrap_or_default();
     match client.get(url).send().await {
         Ok(resp) => {
             if !resp.status().is_success() {
@@ -855,7 +782,7 @@ async fn exec_web_search(args: &serde_json::Value) -> (String, String) {
     }
     let encoded = urlencoding::encode(query);
     let url = format!("https://html.duckduckgo.com/html/?q={}", encoded);
-    let client = reqwest::Client::builder().timeout(std::time::Duration::from_secs(15)).user_agent("Amni-Code/2.0").build().unwrap_or_default();
+    let client = reqwest::Client::builder().timeout(std::time::Duration::from_secs(15)).user_agent(concat!("Amni-Code/", env!("CARGO_PKG_VERSION"))).build().unwrap_or_default();
     match client.get(&url).send().await {
         Ok(resp) => {
             match resp.text().await {
@@ -962,135 +889,71 @@ struct ToolCall {
     name: String,
     args: serde_json::Value,
 }
+fn offline_block_msg(provider: &str) -> String {
+    let label = providers::provider(provider).map(|p| p.label).unwrap_or(provider);
+    format!("Offline mode is on, so {label} (a cloud provider) is disabled. Press Ctrl+K and pick a local model (Adam, Ollama or another local server), or turn Offline mode off.")
+}
+fn tool_schemas(offline: bool, compact: bool) -> Vec<serde_json::Value> {
+    let all: Vec<serde_json::Value> = serde_json::from_str(TOOLS_JSON).unwrap();
+    all.into_iter()
+        .filter(|t| {
+            let n = t["function"]["name"].as_str().unwrap_or("");
+            !(offline && (n == "web_fetch" || n == "web_search")) && (!compact || providers::COMPACT_TOOLS.contains(&n))
+        })
+        .collect()
+}
+fn use_prompt_tools(config: &Config) -> bool {
+    match config.tool_mode.as_str() {
+        "prompt" => true,
+        "native" => false,
+        _ => std::env::var("AMNI_TOOL_MODE").map(|v| v == "prompt").unwrap_or(false) || providers::is_small_local(&config.provider, &config.model),
+    }
+}
 async fn llm_request(
     config: &Config,
     messages: &[serde_json::Value],
     use_tools: bool,
 ) -> Result<(serde_json::Value, Vec<ToolCall>), (String, bool)> {
-    let (url, key_header) = match config.provider.as_str() {
-        "ollama" => (format!("{}/v1/chat/completions", config.base_url), None),
-        "local" => (format!("{}/v1/chat/completions", config.base_url), None),
-        "amni" => (format!("{}/v1/chat/completions", amni_base_url(&config.base_url)), None),
-        "openai" => (
-            format!("{}/v1/chat/completions", config.base_url.trim_end_matches('/')),
-            Some(("Authorization", format!("Bearer {}", config.api_key))),
-        ),
-        "anthropic" => (
-            "https://api.anthropic.com/v1/messages".into(),
-            Some(("x-api-key", config.api_key.clone())),
-        ),
-        "xai" => (
-            "https://api.x.ai/v1/chat/completions".into(),
-            Some(("Authorization", format!("Bearer {}", config.api_key))),
-        ),
-        "google" => ("dummy".into(), None),
-        "deepseek" => (
-            "https://api.deepseek.com/chat/completions".into(),
-            Some(("Authorization", format!("Bearer {}", config.api_key))),
-        ),
-        "groq" => (
-            "https://api.groq.com/openai/v1/chat/completions".into(),
-            Some(("Authorization", format!("Bearer {}", config.api_key))),
-        ),
-        "mistral" => (
-            "https://api.mistral.ai/v1/chat/completions".into(),
-            Some(("Authorization", format!("Bearer {}", config.api_key))),
-        ),
-        "cohere" => (
-            "https://api.cohere.com/v2/chat".into(),
-            Some(("Authorization", format!("Bearer {}", config.api_key))),
-        ),
-        "together" => (
-            "https://api.together.xyz/v1/chat/completions".into(),
-            Some(("Authorization", format!("Bearer {}", config.api_key))),
-        ),
-        "fireworks" => (
-            "https://api.fireworks.ai/inference/v1/chat/completions".into(),
-            Some(("Authorization", format!("Bearer {}", config.api_key))),
-        ),
-        "perplexity" => (
-            "https://api.perplexity.ai/chat/completions".into(),
-            Some(("Authorization", format!("Bearer {}", config.api_key))),
-        ),
-        "openrouter" => (
-            "https://openrouter.ai/api/v1/chat/completions".into(),
-            Some(("Authorization", format!("Bearer {}", config.api_key))),
-        ),
-        other => return Err((format!("Unknown provider: {}", other), false)),
-    };
-    if config.provider == "google" {
-        let prompt = messages.iter().filter_map(|m| {
-            let role = m["role"].as_str().unwrap_or("");
-            let content = m["content"].as_str().unwrap_or("");
-            Some(format!("{}: {}", role, content))
-        }).collect::<Vec<_>>().join("\n");
-        let url = format!("https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent?key={}", config.model, config.api_key);
-        let body = serde_json::json!({"contents": [{"parts": [{"text": prompt}]}]});
-        let client = reqwest::Client::new();
-        let resp = client.post(&url).header("Content-Type", "application/json").json(&body).send().await.map_err(|e| (format!("Request failed: {}", e), false))?;
-        let status = resp.status();
-        let text = resp.text().await.map_err(|e| (format!("Read failed: {}", e), false))?;
-        if !status.is_success() {
-            return Err((format!("API error {}: {}", status, &text[..text.len().min(500)]), false));
-        }
-        let json: serde_json::Value = serde_json::from_str(&text).map_err(|e| (format!("Parse error: {}", e), false))?;
-        let content = json["candidates"][0]["content"]["parts"][0]["text"].as_str().unwrap_or("").to_string();
-        let raw_msg = serde_json::json!({"role": "assistant", "content": content});
-        return Ok((raw_msg, Vec::new()));
+    if config.offline && providers::is_cloud(&config.provider) {
+        return Err((offline_block_msg(&config.provider), false));
     }
-    let max_tokens = std::env::var("AMNI_CODE_MAX_TOKENS").ok().and_then(|v| v.parse::<u32>().ok()).unwrap_or(4096);
-    let mut body =
-        serde_json::json!({"model": config.model, "messages": messages, "max_tokens": max_tokens});
-    if use_tools {
-        let mut tools_arr: Vec<serde_json::Value> = serde_json::from_str(TOOLS_JSON).unwrap();
+    let p = providers::provider(&config.provider).ok_or_else(|| (format!("Unknown provider: {}", config.provider), false))?;
+    if p.cloud && config.api_key.trim().is_empty() {
+        return Err((format!("No API key set for {}. Add one in Settings, or switch to a local provider.", p.label), false));
+    }
+    let base = if config.provider == "amni" { amni_base_url(&config.base_url) } else { config.base_url.clone() };
+    let default_max = if p.cloud { 16000 } else { 4096 };
+    let max_tokens = std::env::var("AMNI_CODE_MAX_TOKENS").ok().and_then(|v| v.parse::<u32>().ok()).unwrap_or(default_max);
+    let prompt_tools = use_tools && use_prompt_tools(config);
+    let mut tools_arr = tool_schemas(config.offline, prompt_tools);
+    if !prompt_tools {
         tools_arr.extend(mcp_tool_schemas().await);
-        let tools = serde_json::Value::Array(tools_arr);
-        body["tools"] = tools;
-        body["tool_choice"] = serde_json::json!("auto");
     }
-    let client = reqwest::Client::new();
-    let mut req = client.post(&url).header("Content-Type", "application/json");
-    if let Some((k, v)) = &key_header {
-        req = req.header(k.to_owned(), v.to_owned());
+    let msgs: Vec<serde_json::Value> = if prompt_tools { providers::to_prompt_tool_messages(messages, &tools_arr) } else { messages.to_vec() };
+    let native_tools = if use_tools && !prompt_tools { Some(tools_arr.as_slice()) } else { None };
+    let req = providers::build_chat_request(&config.provider, &base, &config.api_key, &config.model, &msgs, native_tools, max_tokens).map_err(|e| (e, false))?;
+    let client = reqwest::Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(if p.cloud { 10 } else { 3 }))
+        .timeout(std::time::Duration::from_secs(600))
+        .build()
+        .unwrap_or_default();
+    let mut rb = client.post(&req.url);
+    for (k, v) in &req.headers {
+        rb = rb.header(k.as_str(), v.as_str());
     }
-    if config.provider == "anthropic" {
-        req = req.header("anthropic-version", "2023-06-01");
-    }
-    let resp = req
-        .json(&body)
-        .send()
-        .await
-        .map_err(|e| (format!("Request failed: {}", e), false))?;
+    let resp = rb.json(&req.body).send().await.map_err(|e| {
+        let hint = if e.is_connect() && !p.cloud { format!(" — is the local server running at {base}?") } else { String::new() };
+        (format!("Request to {} failed: {}{}", p.label, e, hint), false)
+    })?;
     let status = resp.status();
-    let text = resp
-        .text()
-        .await
-        .map_err(|e| (format!("Read failed: {}", e), false))?;
+    let text = resp.text().await.map_err(|e| (format!("Read failed: {}", e), false))?;
     if !status.is_success() {
-        let is_tool_err = text.contains("does not support tools")
-            || text.contains("tool_use")
-            || text.contains("tools is not supported");
-        return Err((
-            format!("API error {}: {}", status, &text[..text.len().min(500)]),
-            is_tool_err,
-        ));
+        let is_tool_err = use_tools && !prompt_tools && (text.contains("does not support tools") || text.contains("tools is not supported") || text.contains("tool_use") || text.contains("tool calling"));
+        return Err((format!("API error {}: {}", status, &text[..text.len().min(500)]), is_tool_err));
     }
-    let json: serde_json::Value =
-        serde_json::from_str(&text).map_err(|e| (format!("Parse error: {}", e), false))?;
-    let raw_msg = json["choices"][0]["message"].clone();
-    let mut tool_calls = Vec::new();
-    if use_tools {
-        if let Some(calls) = raw_msg.get("tool_calls").and_then(|t| t.as_array()) {
-            for call in calls {
-                let id = call["id"].as_str().unwrap_or("").to_string();
-                let name = call["function"]["name"].as_str().unwrap_or("").to_string();
-                let args: serde_json::Value =
-                    serde_json::from_str(call["function"]["arguments"].as_str().unwrap_or("{}"))
-                        .unwrap_or_default();
-                tool_calls.push(ToolCall { id, name, args });
-            }
-        }
-    }
+    let json: serde_json::Value = serde_json::from_str(&text).map_err(|e| (format!("Parse error: {}", e), false))?;
+    let (raw_msg, calls) = providers::parse_chat_response(&config.provider, &json, use_tools && !p.cloud);
+    let tool_calls = if use_tools { calls.into_iter().map(|(id, name, args)| ToolCall { id, name, args }).collect() } else { Vec::new() };
     Ok((raw_msg, tool_calls))
 }
 async fn llm_call(
@@ -1099,9 +962,11 @@ async fn llm_call(
 ) -> Result<(serde_json::Value, Vec<ToolCall>), String> {
     match llm_request(config, messages, true).await {
         Ok(r) => Ok(r),
-        Err((_msg, true)) => llm_request(config, messages, false)
-            .await
-            .map_err(|(e, _)| e),
+        Err((_msg, true)) => {
+            let mut c = config.clone();
+            c.tool_mode = "prompt".into();
+            llm_request(&c, messages, true).await.map_err(|(e, _)| e)
+        }
         Err((msg, false)) => Err(msg),
     }
 }
@@ -1241,7 +1106,7 @@ async fn resolve_mentions(user_msg: &str, cwd: &PathBuf) -> Option<String> {
 }
 async fn agent_loop_stream(app:App,sid:String,mut user_msg:String,wd:Option<String>,tx:tokio::sync::mpsc::Sender<SseEvent>){match handle_slash(&app,&sid,&user_msg,&wd,&tx).await{SlashOutcome::Handled=>return,SlashOutcome::Rewrite(p)=>user_msg=p,SlashOutcome::NotSlash=>{}}{let __mcwd=session_cwd(&app,&sid,&wd).await;if let Some(__ex)=resolve_mentions(&user_msg,&__mcwd).await{user_msg=__ex;}}let config=app.config.lock().await.clone();ensure_model_loaded(&config).await;let cwd=app.cwd.lock().await.clone();let cwd_path=if let Some(s)=app.sessions.lock().await.get(&sid){if!s.working_dir.is_empty(){PathBuf::from(&s.working_dir)}else{cwd.clone()}}else{wd.as_ref().map_or(cwd.clone(),|w|PathBuf::from(w))};if is_codebase_explain(&user_msg){let snap=seed_codebase_snapshot(&cwd_path).await;if snap.len()>40{user_msg=format!("{user_msg}\n\n{snap}");}}{let mut sessions=app.sessions.lock().await;let session=sessions.entry(sid.clone()).or_default();if session.messages.is_empty(){let custom=load_custom_instructions(&cwd_path);let sys=SYSTEM_PROMPT.replace("{CWD}",&cwd_path.display().to_string()).replace("{CUSTOM_INSTRUCTIONS}",&custom);session.messages.push(serde_json::json!({"role":"system","content":sys}));if let Some(w)=wd{session.working_dir=w.clone();}}session.messages.push(serde_json::json!({"role":"user","content":&user_msg}));compact_context(&mut session.messages);}let interrupt_flag={let mut interrupts=app.interrupts.lock().await;let flag=interrupts.entry(sid.clone()).or_insert_with(||Arc::new(AtomicBool::new(false))).clone();flag.store(false,std::sync::atomic::Ordering::Relaxed);flag};
 let _=tx.send(SseEvent::default().event("session").data(serde_json::json!({"session_id":&sid}).to_string())).await;
-if let Some(seat)=cli_seats::seat(&config.provider){let hist=app.sessions.lock().await.get(&sid).map(|s|s.messages.clone()).unwrap_or_default();let body=if seat.id=="claude-code"&&cli_seats::has_pin(&sid){user_msg.clone()}else{cli_seats::transcript_prefix(&hist,&user_msg)};match cli_seats::run(seat,&config.model,&config.mode,config.auto_approve,&cwd_path,&body,&sid,interrupt_flag.clone(),tx.clone()).await{Ok(text)=>{app.sessions.lock().await.entry(sid.clone()).or_default().messages.push(serde_json::json!({"role":"assistant","content":&text}));let _=tx.send(SseEvent::default().event("message").data(serde_json::json!({"message":&text}).to_string())).await;let _=tx.send(SseEvent::default().event("done").data(serde_json::json!({"session_id":&sid}).to_string())).await;}Err(e)=>{if e=="interrupted"{let _=tx.send(SseEvent::default().event("interrupted").data(serde_json::json!({"session_id":&sid}).to_string())).await;}else{let _=tx.send(SseEvent::default().event("error").data(serde_json::json!({"error":&e}).to_string())).await;}}}return;}let max_iters=std::env::var("AMNI_CODE_MAX_ITERS").ok().and_then(|v|v.parse::<u32>().ok()).unwrap_or(100);let mut it:u32=0;while it<max_iters{if interrupt_flag.load(std::sync::atomic::Ordering::Relaxed){let _=tx.send(SseEvent::default().event("interrupted").data(serde_json::json!({"session_id":&sid}).to_string())).await;return;}it+=1;let messages=app.sessions.lock().await.entry(sid.clone()).or_default().messages.clone();match llm_call(&config,&messages).await{Ok((raw_msg,tool_calls))=>{if let Some(widgets)=raw_msg.get("amni_widgets").and_then(|w|w.as_array()){for w in widgets{let _=tx.send(SseEvent::default().event("widget").data(w.to_string())).await;}}if tool_calls.is_empty(){let content=raw_msg["content"].as_str().unwrap_or("").to_string();app.sessions.lock().await.entry(sid.clone()).or_default().messages.push(raw_msg);let _=tx.send(SseEvent::default().event("message").data(serde_json::json!({"message":&content}).to_string())).await;let _=tx.send(SseEvent::default().event("done").data(serde_json::json!({"session_id":&sid}).to_string())).await;return;}
+if config.offline&&cli_seats::is_seat(&config.provider){let _=tx.send(SseEvent::default().event("error").data(serde_json::json!({"error":format!("Offline mode is on, so the subscription CLI '{}' (a cloud service) is disabled. Pick a local model with Ctrl+K, or turn Offline mode off.",config.provider)}).to_string())).await;let _=tx.send(SseEvent::default().event("done").data(serde_json::json!({"session_id":&sid}).to_string())).await;return;}if let Some(seat)=cli_seats::seat(&config.provider){let hist=app.sessions.lock().await.get(&sid).map(|s|s.messages.clone()).unwrap_or_default();let body=if seat.id=="claude-code"&&cli_seats::has_pin(&sid){user_msg.clone()}else{cli_seats::transcript_prefix(&hist,&user_msg)};match cli_seats::run(seat,&config.model,&config.mode,config.auto_approve,&cwd_path,&body,&sid,interrupt_flag.clone(),tx.clone()).await{Ok(text)=>{app.sessions.lock().await.entry(sid.clone()).or_default().messages.push(serde_json::json!({"role":"assistant","content":&text}));let _=tx.send(SseEvent::default().event("message").data(serde_json::json!({"message":&text}).to_string())).await;let _=tx.send(SseEvent::default().event("done").data(serde_json::json!({"session_id":&sid}).to_string())).await;}Err(e)=>{if e=="interrupted"{let _=tx.send(SseEvent::default().event("interrupted").data(serde_json::json!({"session_id":&sid}).to_string())).await;}else{let _=tx.send(SseEvent::default().event("error").data(serde_json::json!({"error":&e}).to_string())).await;}}}return;}let max_iters=std::env::var("AMNI_CODE_MAX_ITERS").ok().and_then(|v|v.parse::<u32>().ok()).unwrap_or(100);let mut it:u32=0;while it<max_iters{if interrupt_flag.load(std::sync::atomic::Ordering::Relaxed){let _=tx.send(SseEvent::default().event("interrupted").data(serde_json::json!({"session_id":&sid}).to_string())).await;return;}it+=1;let messages=app.sessions.lock().await.entry(sid.clone()).or_default().messages.clone();match llm_call(&config,&messages).await{Ok((raw_msg,tool_calls))=>{if let Some(widgets)=raw_msg.get("amni_widgets").and_then(|w|w.as_array()){for w in widgets{let _=tx.send(SseEvent::default().event("widget").data(w.to_string())).await;}}if tool_calls.is_empty(){let content=raw_msg["content"].as_str().unwrap_or("").to_string();app.sessions.lock().await.entry(sid.clone()).or_default().messages.push(raw_msg);let _=tx.send(SseEvent::default().event("message").data(serde_json::json!({"message":&content}).to_string())).await;let _=tx.send(SseEvent::default().event("done").data(serde_json::json!({"session_id":&sid}).to_string())).await;return;}
                 app.sessions
                     .lock()
                     .await
@@ -1292,6 +1157,8 @@ if let Some(seat)=cli_seats::seat(&config.provider){let hist=app.sessions.lock()
                         mem.entry(key.clone()).or_default().push(content.clone());
                         save_memory_store(&cwd_path, &mem);
                         (format!("Stored to memory key '{}': {} chars", key, content.len()), "success".into())
+                    } else if config.offline && (tc.name == "web_fetch" || tc.name == "web_search") {
+                        (format!("{} is disabled in Offline mode. Work from local files instead.", tc.name), "error".into())
                     } else if tc.name.starts_with("mcp__") {
                         mcp_call(&tc.name, tc.args.clone()).await
                     } else {
@@ -1390,6 +1257,13 @@ async fn handle_config_set(State(app): State<App>, Json(req): Json<ConfigReq>) -
     }
     if let Some(v) = req.model_dir {
         cfg.model_dir = v;
+    }
+    if let Some(v) = req.offline {
+        cfg.offline = v;
+        OFFLINE.store(v, std::sync::atomic::Ordering::Relaxed);
+    }
+    if let Some(v) = req.tool_mode {
+        cfg.tool_mode = v;
     }
     normalize_config(&mut cfg);
     persist_config(&cfg);
@@ -1721,239 +1595,45 @@ async fn handle_server_log(State(app): State<App>) -> Sse<impl futures::Stream<I
 async fn handle_seats() -> Json<serde_json::Value> { Json(cli_seats::status_json()) }
 async fn handle_models(State(app): State<App>) -> Json<ModelsRes> {
     let cfg = app.config.lock().await.clone();
-    if let Some(s) = cli_seats::seat(&cfg.provider) { return Json(ModelsRes { models: s.models.iter().map(|m| m.to_string()).collect() }); }
-    let base = cfg.base_url.trim_end_matches('/').to_string();
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(5))
-        .build()
-        .unwrap_or_default();
-    let mut models = Vec::new();
-    tracing::info!(
-        "Model discovery: provider={}, base_url={}",
-        cfg.provider,
-        base
-    );
-    if cfg.provider == "ollama" {
-        let ollama_installed = tokio::process::Command::new("ollama")
-            .arg("--version")
-            .output()
-            .await
-            .map(|o| o.status.success())
-            .unwrap_or(false);
-        if ollama_installed {
-            let mut resp = client.get(format!("{}/api/tags", base)).send().await;
-            if resp.is_err() {
-                let _ = tokio::process::Command::new("ollama").arg("serve").spawn();
-                tokio::time::sleep(tokio::time::Duration::from_secs(3)).await;
-                resp = client.get(format!("{}/api/tags", base)).send().await;
-            }
-            if let Ok(r) = resp {
-                if let Ok(json) = r.json::<serde_json::Value>().await {
-                    if let Some(arr) = json["models"].as_array() {
-                        for m in arr {
-                            if let Some(n) = m["name"].as_str() {
-                                models.push(n.to_string());
-                            }
-                        }
-                    }
-                }
-            }
+    if let Some(s) = cli_seats::seat(&cfg.provider) {
+        return Json(ModelsRes { models: s.models.iter().map(|m| m.to_string()).collect(), source: Some("seat".into()), error: None, offline_capable: false });
+    }
+    let base = if cfg.provider == "amni" { amni_base_url(&cfg.base_url) } else { cfg.base_url.trim_end_matches('/').to_string() };
+    let listed = providers::list_models(&cfg.provider, &base, &cfg.api_key, cfg.offline).await;
+    let mut models = listed.models;
+    let mut source = listed.source.to_string();
+    if cfg.provider == "ollama" && listed.source == "fallback" && !cfg.offline {
+        let installed = tokio::process::Command::new("ollama").arg("--version").output().await.map(|o| o.status.success()).unwrap_or(false);
+        if installed {
+            let _ = tokio::process::Command::new("ollama").arg("serve").stdout(Stdio::null()).stderr(Stdio::null()).spawn();
+            tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+            let again = providers::list_models("ollama", &base, "", false).await;
+            if again.source == "live" { models = again.models; source = "live".into(); }
         }
-        if models.is_empty() {
-            let scan_dir = if !cfg.model_dir.is_empty() {
-                Some(PathBuf::from(&cfg.model_dir))
-            } else {
-                auto_detect_model_dir(&cfg.working_dir).await
-            };
-            if let Some(d) = scan_dir {
-                tracing::info!("Ollama file scan: {:?}", d);
-                models = collect_models(&d).await;
-            }
-        }
-    } else if cfg.provider == "local" {
-        tracing::info!("Local: trying {}/v1/models", base);
-        match client.get(format!("{}/v1/models", base)).send().await {
-            Ok(resp) => {
-                let status = resp.status();
-                match resp.json::<serde_json::Value>().await {
-                    Ok(json) => {
-                        tracing::info!("Local /v1/models status={} body={}", status, json);
-                        if let Some(arr) = json["data"].as_array() {
-                            for m in arr {
-                                if let Some(n) = m["id"].as_str() {
-                                    models.push(n.to_string());
-                                }
-                            }
-                        }
-                    }
-                    Err(e) => tracing::warn!("Local /v1/models parse error: {}", e),
-                }
-            }
-            Err(e) => tracing::warn!("Local /v1/models fetch error: {}", e),
-        }
-        if models.is_empty() {
-            tracing::info!("Local: trying {}/api/tags", base);
-            match client.get(format!("{}/api/tags", base)).send().await {
-                Ok(resp) => {
-                    let status = resp.status();
-                    match resp.json::<serde_json::Value>().await {
-                        Ok(json) => {
-                            tracing::info!("Local /api/tags status={} body={}", status, json);
-                            if let Some(arr) = json["models"].as_array() {
-                                for m in arr {
-                                    if let Some(n) = m["name"].as_str() {
-                                        models.push(n.to_string());
-                                    }
-                                }
-                            }
-                        }
-                        Err(e) => tracing::warn!("Local /api/tags parse error: {}", e),
-                    }
-                }
-                Err(e) => tracing::warn!("Local /api/tags fetch error: {}", e),
-            }
-        }
-        let scan_dir = if !cfg.model_dir.is_empty() {
-            Some(PathBuf::from(&cfg.model_dir))
-        } else {
-            auto_detect_model_dir(&cfg.working_dir).await
-        };
+    }
+    if matches!(cfg.provider.as_str(), "ollama" | "local") {
+        let scan_dir = if !cfg.model_dir.is_empty() { Some(PathBuf::from(&cfg.model_dir)) } else { auto_detect_model_dir(&cfg.working_dir).await };
         if let Some(d) = scan_dir {
-            tracing::info!("Local file scan: {:?}", d);
-            let file_models = collect_models(&d).await;
-            for m in file_models {
-                if !models.contains(&m) {
-                    models.push(m);
-                }
-            }
-        }
-    } else if cfg.provider == "openai" {
-        if !cfg.api_key.is_empty() {
-            if let Ok(resp) = client
-                .get(format!("{}/v1/models", base))
-                .header("Authorization", format!("Bearer {}", cfg.api_key))
-                .send()
-                .await
-            {
-                if let Ok(json) = resp.json::<serde_json::Value>().await {
-                    if let Some(arr) = json["data"].as_array() {
-                        for m in arr {
-                            if let Some(id) = m["id"].as_str() {
-                                if id.starts_with("gpt-") || id.starts_with("o") {
-                                    // Skip known deprecated
-                                    if !id.contains("preview")
-                                        && !id.contains("deprecated")
-                                        && !id.contains("dall-e")
-                                        && !id.contains("tts")
-                                        && !id.contains("whisper")
-                                        && !id.contains("embedding")
-                                        && !id.contains("moderation")
-                                        && !id.contains("babbage")
-                                        && !id.contains("davinci")
-                                        && !id.contains("ada")
-                                        && !id.contains("curie")
-                                    {
-                                        models.push(id.to_string());
-                                    }
-                                }
-                            }
-                        }
-                        models.sort();
-                        models.dedup();
-                    }
-                }
-            }
-        }
-        // Fallback if fetch fails
-        if models.is_empty() {
-            models.extend(
-                [
-                    "gpt-5.4",
-                    "gpt-5.4-pro",
-                    "gpt-5.4-mini",
-                    "gpt-5.4-nano",
-                    "gpt-5-mini",
-                    "gpt-5-nano",
-                    "gpt-5",
-                    "gpt-4.1",
-                    "gpt-5.2",
-                    "gpt-5.1",
-                    "gpt-5.2-pro",
-                    "gpt-5-pro",
-                    "o3-pro",
-                    "o3",
-                    "o4-mini",
-                    "gpt-4.1-mini",
-                    "gpt-4.1-nano",
-                    "o1-pro",
-                    "o3-mini",
-                    "o1",
-                    "gpt-4o",
-                    "gpt-4o-mini",
-                    "gpt-4-turbo",
-                    "gpt-3.5-turbo",
-                    "gpt-4",
-                ]
-                .iter()
-                .map(|s| s.to_string()),
-            );
-        }
-    } else if cfg.provider == "anthropic" {
-        models.extend(
-            [
-                "claude-sonnet-4-20250514",
-                "claude-opus-4-20250514",
-                "claude-haiku-4-20241022",
-            ]
-            .iter()
-            .map(|s| s.to_string()),
-        );
-    } else if cfg.provider == "xai" {
-        models.extend(
-            [
-                "grok-4-1-fast-reasoning",
-                "grok-4-1-fast-non-reasoning",
-                "grok-4.20-0309-reasoning",
-                "grok-4.20-0309-non-reasoning",
-                "grok-4.20-multi-agent-0309",
-            ]
-            .iter()
-            .map(|s| s.to_string()),
-        );
-    } else if cfg.provider == "google" {
-        models.extend(["gemini-2.5-pro","gemini-2.5-flash","gemini-2.0-flash","gemini-2.0-flash-lite","gemini-1.5-pro"].iter().map(|s| s.to_string()));
-    } else if cfg.provider == "deepseek" {
-        models.extend(["deepseek-chat","deepseek-reasoner","deepseek-coder"].iter().map(|s| s.to_string()));
-    } else if cfg.provider == "groq" {
-        models.extend(["llama-3.3-70b-versatile","llama-3.1-8b-instant","llama-3.1-70b-versatile","mixtral-8x7b-32768","gemma2-9b-it","deepseek-r1-distill-llama-70b"].iter().map(|s| s.to_string()));
-    } else if cfg.provider == "mistral" {
-        models.extend(["mistral-large-latest","mistral-medium-latest","mistral-small-latest","codestral-latest","open-mistral-nemo","open-codestral-mamba"].iter().map(|s| s.to_string()));
-    } else if cfg.provider == "cohere" {
-        models.extend(["command-r-plus","command-r","command-a-03-2025"].iter().map(|s| s.to_string()));
-    } else if cfg.provider == "together" {
-        models.extend(["meta-llama/Llama-3.3-70B-Instruct-Turbo","meta-llama/Meta-Llama-3.1-405B-Instruct-Turbo","deepseek-ai/DeepSeek-R1","Qwen/Qwen2.5-72B-Instruct-Turbo","mistralai/Mixtral-8x22B-Instruct-v0.1"].iter().map(|s| s.to_string()));
-    } else if cfg.provider == "fireworks" {
-        models.extend(["accounts/fireworks/models/llama-v3p3-70b-instruct","accounts/fireworks/models/mixtral-8x22b-instruct","accounts/fireworks/models/deepseek-r1"].iter().map(|s| s.to_string()));
-    } else if cfg.provider == "perplexity" {
-        models.extend(["sonar-pro","sonar","sonar-deep-research","sonar-reasoning-pro"].iter().map(|s| s.to_string()));
-    } else if cfg.provider == "openrouter" {
-        models.extend(["openai/gpt-4o","anthropic/claude-sonnet-4","google/gemini-2.5-pro","meta-llama/llama-3.3-70b-instruct","deepseek/deepseek-r1"].iter().map(|s| s.to_string()));
-    } else if cfg.provider == "amni" {
-        let amni_base = amni_base_url(&base);
-        if let Ok(resp) = client.get(format!("{}/v1/models", amni_base)).send().await {
-            if let Ok(json) = resp.json::<serde_json::Value>().await {
-                if let Some(arr) = json["data"].as_array() {
-                    for m in arr {
-                        if m["available"].as_bool().unwrap_or(true) {
-                            if let Some(id) = m["id"].as_str() { models.push(id.to_string()); }
-                        }
-                    }
-                }
+            for m in collect_models(&d).await {
+                if !models.contains(&m) { models.push(m); }
             }
         }
     }
-    tracing::info!("Model discovery found {} models", models.len());
-    Json(ModelsRes { models })
+    if !providers::is_cloud(&cfg.provider) && cfg.provider != "amni" {
+        for m in providers::SUGGESTED_LOCAL {
+            let s = m.ollama.to_string();
+            if !models.iter().any(|x| x.starts_with(&s)) { models.push(s); }
+        }
+    }
+    tracing::info!("Model discovery: provider={} source={} found={}", cfg.provider, source, models.len());
+    Json(ModelsRes { models, source: Some(source), error: listed.error, offline_capable: !providers::is_cloud(&cfg.provider) })
+}
+async fn handle_providers(State(app): State<App>) -> Json<serde_json::Value> {
+    let offline = app.config.lock().await.offline;
+    Json(providers::providers_json(offline))
+}
+async fn handle_local_servers() -> Json<serde_json::Value> {
+    Json(serde_json::json!({"servers": providers::detect_local_servers().await}))
 }
 async fn handle_dirs(
     axum::extract::Query(q): axum::extract::Query<DirQuery>,
@@ -2287,12 +1967,14 @@ struct HfModelResult {
     tags: Vec<String>,
 }
 async fn handle_hf_search(Query(q): Query<HfSearchQuery>) -> Json<Vec<HfModelResult>> {
+    if is_offline() { return Json(vec![]); }
     let query = q.q.unwrap_or_default();
     if query.is_empty() {
         return Json(vec![]);
     }
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(15))
+        .connect_timeout(std::time::Duration::from_secs(4))
         .build()
         .unwrap_or_default();
     let url = format!(
@@ -2339,6 +2021,7 @@ struct HfFileInfo {
     size: u64,
 }
 async fn handle_hf_files(Query(q): Query<HfFilesQuery>) -> Json<Vec<HfFileInfo>> {
+    if is_offline() { return Json(vec![]); }
     let repo = q.repo.unwrap_or_default();
     if repo.is_empty() {
         return Json(vec![]);
@@ -2543,20 +2226,49 @@ async fn serve_dual_js()->impl IntoResponse{_asset(include_str!("../static/dual-
 async fn serve_archivo()->impl IntoResponse{_asset(include_bytes!("../static/fonts/archivo-var.woff2"),"font/woff2")}
 async fn serve_sourceserif()->impl IntoResponse{_asset(include_bytes!("../static/fonts/sourceserif4-var.woff2"),"font/woff2")}
 async fn serve_archivo_ext()->impl IntoResponse{_asset(include_bytes!("../static/fonts/archivo-var-ext.woff2"),"font/woff2")}
+mod vendor { include!(concat!(env!("OUT_DIR"), "/vendor_assets.rs")); }
+fn mime_for(path: &str) -> &'static str {
+    match path.rsplit('.').next().unwrap_or("") {
+        "js" => "application/javascript; charset=utf-8",
+        "css" => "text/css; charset=utf-8",
+        "ttf" => "font/ttf",
+        "woff2" => "font/woff2",
+        "svg" => "image/svg+xml",
+        "json" => "application/json",
+        _ => "application/octet-stream",
+    }
+}
+async fn serve_vendor(axum::extract::Path(path): axum::extract::Path<String>) -> Response {
+    match vendor::vendor_asset(&path) {
+        Some(b) => {
+            let mut r = _asset(b, mime_for(&path));
+            r.headers_mut().insert(header::CACHE_CONTROL, HeaderValue::from_static("public, max-age=86400"));
+            r
+        }
+        None => (StatusCode::NOT_FOUND, "not found").into_response(),
+    }
+}
+async fn serve_ui_css()->impl IntoResponse{_asset(include_str!("../static/ui.css").as_bytes(),"text/css; charset=utf-8")}
+async fn serve_ui_js()->impl IntoResponse{_asset(include_str!("../static/ui.js").as_bytes(),"application/javascript; charset=utf-8")}
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt::init();
     let cwd = std::env::current_dir().unwrap_or_default();
     let src_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
     let exe_path = std::env::current_exe().unwrap_or_default();
-    let get_hash = |dir: &std::path::Path| std::process::Command::new("git").args(["rev-parse","HEAD"]).current_dir(dir).output().ok().map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string());
-    let hash_before = get_hash(src_dir);
-    let _ = std::process::Command::new("git").args(["pull","--ff-only","--quiet"]).current_dir(src_dir).status();
-    let hash_after = get_hash(src_dir);
-    if hash_before.as_deref() != hash_after.as_deref() {
-        println!("  New version detected, rebuilding...");
-        let ok = std::process::Command::new("cargo").args(["install","--path",".","--force","--quiet"]).current_dir(src_dir).status().map(|s|s.success()).unwrap_or(false);
-        if ok { println!("  Restarting..."); let _ = std::process::Command::new(&exe_path).args(std::env::args().skip(1)).status(); std::process::exit(0); }
+    let no_update = env_offline() || std::env::var("AMNI_NO_SELF_UPDATE").is_ok() || std::env::args().any(|a| a == "--no-update" || a == "--serve" || a == "--no-window") || !src_dir.join(".git").exists();
+    if !no_update {
+        // Fail soft and fast: a git pull that cannot reach the network is killed after 5 s.
+        let get_hash = |dir: &std::path::Path| std::process::Command::new("git").args(["rev-parse","HEAD"]).current_dir(dir).output().ok().map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string());
+        let hash_before = get_hash(src_dir);
+        let pulled = tokio::time::timeout(std::time::Duration::from_secs(5), tokio::process::Command::new("git").args(["pull","--ff-only","--quiet"]).env("GIT_TERMINAL_PROMPT","0").current_dir(src_dir).kill_on_drop(true).status()).await;
+        if pulled.is_err() { println!("  Update check skipped (no network)"); }
+        let hash_after = get_hash(src_dir);
+        if hash_before.as_deref() != hash_after.as_deref() {
+            println!("  New version detected, rebuilding...");
+            let ok = std::process::Command::new("cargo").args(["install","--path",".","--force","--quiet"]).current_dir(src_dir).status().map(|s|s.success()).unwrap_or(false);
+            if ok { println!("  Restarting..."); let _ = std::process::Command::new(&exe_path).args(std::env::args().skip(1)).status(); std::process::exit(0); }
+        }
     }
     let home_env = dirs::home_dir()
         .map(|h| h.join(".amni").join(".env"))
@@ -2599,6 +2311,8 @@ async fn main() -> anyhow::Result<()> {
         let p = std::fs::canonicalize(d).unwrap_or_else(|_| PathBuf::from(d));
         config.working_dir = p.to_string_lossy().to_string();
     }
+    if env_offline() { config.offline = true; }
+    OFFLINE.store(config.offline, std::sync::atomic::Ordering::Relaxed);
     let effective_cwd = PathBuf::from(&config.working_dir);
     let custom_inst = load_custom_instructions(&effective_cwd);
     println!("\n  Amni-Code v{} — AI Coding Agent",env!("CARGO_PKG_VERSION"));
@@ -2606,6 +2320,12 @@ async fn main() -> anyhow::Result<()> {
     if !custom_inst.is_empty() { println!("  Custom instructions: loaded from project"); }
     let memory = load_memory_store(&effective_cwd);
     if !memory.is_empty() { println!("  Memory: {} keys loaded", memory.len()); }
+    if config.offline { println!("  Offline mode: cloud providers and web tools disabled"); }
+    for srv in providers::detect_local_servers().await {
+        if srv["up"].as_bool().unwrap_or(false) {
+            println!("  Local model server: {} at {} ({} models)", srv["label"].as_str().unwrap_or(""), srv["base_url"].as_str().unwrap_or(""), srv["models"].as_array().map(|a| a.len()).unwrap_or(0));
+        }
+    }
     let (server_log_tx,_)=broadcast::channel::<String>(512);
     let (fs_tx,_)=broadcast::channel::<String>(256);
     if !config.mcp_servers.is_empty(){mcp_init(&config.mcp_servers).await;}
@@ -2650,6 +2370,9 @@ async fn main() -> anyhow::Result<()> {
         .route("/", get(serve_ui))
         .route("/assets/dual-skin.css", get(serve_dual_css))
         .route("/assets/dual-skin.js", get(serve_dual_js))
+        .route("/assets/ui.css", get(serve_ui_css))
+        .route("/assets/ui.js", get(serve_ui_js))
+        .route("/vendor/{*path}", get(serve_vendor))
         .route("/assets/fonts/archivo-var.woff2", get(serve_archivo))
         .route("/assets/fonts/archivo-var-ext.woff2", get(serve_archivo_ext))
         .route("/assets/fonts/sourceserif4-var.woff2", get(serve_sourceserif))
@@ -2680,21 +2403,25 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/fs-events", get(handle_fs_events))
         .route("/api/memory", get(handle_memory_list))
         .route("/api/seats", get(handle_seats))
+        .route("/api/providers", get(handle_providers))
+        .route("/api/local-servers", get(handle_local_servers))
         .route("/health", get(handle_health))
         .layer(CorsLayer::permissive())
         .with_state(app);
-    let use_browser = std::env::args().any(|a| a == "--browser");
+    let serve_only = std::env::args().any(|a| a == "--serve" || a == "--no-window" || a == "--headless");
+    let use_browser = serve_only || std::env::args().any(|a| a == "--browser");
     let ui_port: u16 = std::env::var("AMNI_CODE_PORT")
         .ok()
         .and_then(|s| s.parse().ok())
         .unwrap_or(3030);
     let ui_url = format!("http://localhost:{}", ui_port);
-    let bind_addr = format!("0.0.0.0:{}", ui_port);
+    let bind_host = std::env::var("AMNI_CODE_HOST").unwrap_or_else(|_| "0.0.0.0".into());
+    let bind_addr = format!("{}:{}", bind_host, ui_port);
     if use_browser {
         let listener = tokio::net::TcpListener::bind(&bind_addr).await?;
         println!("  Server: {}", ui_url);
-        println!("  Opening browser...\n");
-        if std::env::var("AMNI_CODE_NO_OPEN").is_err() { let _ = open::that(&ui_url); }
+        if !serve_only { println!("  Opening browser...\n"); }
+        if !serve_only && std::env::var("AMNI_CODE_NO_OPEN").is_err() { let _ = open::that(&ui_url); }
         axum::serve(listener, router).await?;
     } else {
         let bind_addr2 = bind_addr.clone();

@@ -8,7 +8,7 @@ The fastest way to get started:
 
 ```bash
 # Download and run the quickstart script
-curl -L -o quickstart.bat https://raw.githubusercontent.com/anmire/Amni-Code/main/quickstart.bat
+curl -L -o quickstart.bat https://raw.githubusercontent.com/Amnibro/Amni-Code/main/quickstart.bat
 quickstart.bat
 ```
 
@@ -30,7 +30,7 @@ quickstart.bat
 For a guided experience with progress bars and hardware detection:
 
 ```bash
-git clone https://github.com/anmire/Amni-Code.git
+git clone https://github.com/Amnibro/Amni-Code.git
 cd Amni-Code
 install.bat
 ```
@@ -45,15 +45,22 @@ The GUI installer provides:
 ## Manual Build
 
 ```bash
-git clone https://github.com/anmire/Amni-Code.git
+git clone https://github.com/Amnibro/Amni-Code.git
 cd Amni-Code
 cargo build --release
-target\release\amni-code.exe
+target\release\amni.exe   (Linux/macOS: ./target/release/amni)
 ```
 
 ## Setting Up API Keys
 
-Amni-Code defaults to **xAI Grok**. You need at least one API key from a supported provider.
+Amni-Code defaults to **Adam / Amni-AI on your own machine** (`http://127.0.0.1:7700`) and also finds Ollama (`:11434`), llama.cpp (`:8080`) and LM Studio (`:1234`) automatically. **No API key is needed for local models.** Keys are only for the optional cloud providers.
+
+### Fully offline
+1. Start a local model server, e.g. `ollama serve`, then `ollama pull hf.co/ibm-granite/granite-4.2-3b-GGUF` (small, 128K context) or `ollama pull hf.co/unsloth/Qwen3.8-27B-GGUF` (stronger, 262K context). Do the pull while you still have internet.
+2. Launch `amni --offline` (or press `Ctrl+Shift+O` in the app, or tick **Offline mode** in Settings).
+3. Press `Ctrl+K` and pick a model under **Local · works offline**.
+
+In Offline mode cloud providers, `web_search`, `web_fetch`, Hugging Face downloads and the start-up update check are switched off and say so straight away instead of timing out. The whole UI, including the Monaco editor, is served from the binary.
 
 ### During Installation
 The quickstart script and GUI installer both prompt for API keys. They're saved to a `.env` file (gitignored).
@@ -61,16 +68,17 @@ The quickstart script and GUI installer both prompt for API keys. They're saved 
 ### After Installation
 1. Open http://localhost:3030
 2. Click the **⚙ Settings** button (top right)
-3. Select your **Provider** (xAI, OpenAI, Anthropic, Ollama)
-4. Enter your **API Key**
+3. Select your **Provider** (Adam, Ollama, custom local endpoint, Anthropic, OpenAI, Google Gemini, xAI) — or press `Ctrl+K` for the quick picker
+4. Enter your **API Key** (cloud providers only)
 5. Close the settings panel — changes save automatically
 
 ### Manual `.env` File
 Create a `.env` file in the Amni-Code directory:
 ```
-XAI_API_KEY=xai-your-key-here
-OPENAI_API_KEY=sk-your-key-here
-ANTHROPIC_API_KEY=sk-ant-your-key-here
+ANTHROPIC_API_KEY=your-key-here
+OPENAI_API_KEY=your-key-here
+GEMINI_API_KEY=your-key-here
+XAI_API_KEY=your-key-here
 ```
 
 ## Using Amni-Code
@@ -81,7 +89,7 @@ Type anything in the text box and press Enter. The agent will:
 - Write or edit files to implement changes
 - Run shell commands (build, test, install)
 - Search across your project for relevant code
-- Iterate up to 15 times per request to complete complex tasks
+- Iterate until the task is done (cap: `AMNI_CODE_MAX_ITERS`), showing each tool call live as it runs
 
 ### Example Prompts
 
@@ -118,13 +126,17 @@ The agent operates in the directory shown in Settings. Change it to point at any
 
 ## Supported Providers
 
-| Provider | Models | API Key Env Var |
-|----------|--------|-----------------|
-| **xAI** (default) | grok-4-1-fast-reasoning, grok-4.20-0309-reasoning, grok-4.20-multi-agent-0309 | `XAI_API_KEY` |
-| **OpenAI** | gpt-4o, gpt-4o-mini, o1, o3-mini | `OPENAI_API_KEY` |
-| **Anthropic** | claude-sonnet-4, claude-opus-4, claude-3.5-haiku | `ANTHROPIC_API_KEY` |
-| **Ollama** | Any local model | (none needed) |
-| **Custom** | Any OpenAI-compatible server | (none needed) |
+| Provider | Default / suggested models | Key | Offline |
+|----------|-----------------------------|-----|---------|
+| **Adam / Amni-AI** (default) | `adam:3b`, `adam:8b` (live list from `/v1/models`) | none | yes |
+| **Ollama** | live list from `/api/tags`; suggested Granite 4.2 3B, Qwen 3.8 27B | none | yes |
+| **Custom local** | live list from `/v1/models` (llama.cpp, LM Studio, vLLM…) | optional | yes |
+| **Anthropic** | `claude-opus-5-5`, `claude-sonnet-5-5`, `claude-haiku-5-5`, `claude-fable-5-2` | `ANTHROPIC_API_KEY` | no |
+| **OpenAI** | `gpt-6-astra`, `gpt-6.1-sol`, `gpt-6-luna`, `gpt-6.1-terra` | `OPENAI_API_KEY` | no |
+| **Google Gemini** | `gemini-3.8-flash`, `gemini-3.6-flash`, `gemini-3.5-flash-lite`, `gemini-3.1-pro-preview` | `GEMINI_API_KEY` | no |
+| **xAI** | `grok-4.7`, `grok-4.6`, `grok-4.5`, `grok-build-0.1` | `XAI_API_KEY` | no |
+
+With a key set, the model list comes live from the provider's own models endpoint; the ids above are the fallback when it cannot be reached.
 
 ## Troubleshooting
 
@@ -133,6 +145,10 @@ The agent operates in the directory shown in Settings. Change it to point at any
 **Build fails:** Make sure Rust is installed: `rustup --version`. If not, run `quickstart.bat` or install from https://rustup.rs.
 
 **"Request failed" error:** Your API key may be invalid or the provider is unreachable. Check Settings and verify your key.
+
+**"Offline mode is on…" message:** a cloud provider is selected while Offline mode is on. Press `Ctrl+K` and pick a local model, or turn Offline mode off.
+
+**Headless / remote box:** run `amni --serve` and open `http://localhost:3030` in any browser.
 
 **Ollama not responding:** Make sure Ollama is running (`ollama serve`) and accessible at `http://localhost:11434`.
 

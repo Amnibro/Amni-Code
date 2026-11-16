@@ -1,4 +1,11 @@
-# Amni-Code Architecture Map v2.9.0
+# Amni-Code Architecture Map v3.0.0
+
+## v3.0.0 providers, offline-first, picker
+- `src/providers.rs`: `PROVIDERS` table (id, base, chat/models path, `Wire::OpenAi|Anthropic`, cloud, key envs, confirmed fallback ids), `build_chat_request` / `parse_chat_response` (Anthropic Messages conversion, OpenAI `max_completion_tokens`, Gemini OpenAI-compat), text tool protocol (`prompt_tools_system`, `to_prompt_tool_messages`, `parse_text_tool_calls`), `list_models` (live + 10 min cache + fallback; never touches cloud offline), `detect_local_servers`, `SUGGESTED_LOCAL` (Granite 4.2 3B, Qwen 3.8 27B).
+- `main.rs`: `llm_request` delegates to providers; `Config.offline` / `Config.tool_mode`; static `OFFLINE` flag for handlers without state; routes `/api/providers`, `/api/local-servers`, `/vendor/{*path}`, `/assets/ui.css|ui.js`; flags `--serve|--no-window|--headless`, `--offline`, `--no-update`; env `AMNI_OFFLINE`, `AMNI_CODE_HOST`, `AMNI_NO_SELF_UPDATE`, `AMNI_TOOL_MODE`.
+- `build.rs` embeds every file under `static/vendor/` (Monaco 0.44.0) via a generated `vendor_asset()` match.
+- `static/ui.js` + `static/ui.css` (loaded after index.html's own CSS/JS): composer bar, `Ctrl+K` picker, offline toggle, live tool timeline (`AmniLive.start/end`, called from `send()`), shortcuts dialog, narrow layout.
+- Tests: `tests/test_v3_0_0.py`, `tests/e2e/{offline_e2e.sh,offline_ui.js,stub_llm.py,lo_up.py}`.
 ## Ports
 - **UI / Axum:** default **3030** (`AMNI_CODE_PORT` env override). Haven owns **3000** — do not reclaim it.
 - Health: `GET http://127.0.0.1:3030/health`

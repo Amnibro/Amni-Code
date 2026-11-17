@@ -1,0 +1,45 @@
+use web
+use json
+use core
+into look.he
+lang he
+
+The module is namespace `look`. It owns the tags 300 to 399, all i32 constants: `T_TOGGLE` is 301 (click on the element "theme-toggle"), `T_ACCENT` is 302 (click on "theme-cycle"), `T_MENU` is 303 (click on "menu-btn") and `T_HEALTH` is 304 (the fetch of "/health").
+
+`accent_idx` is a module integer that starts at 0. It is the position of the current accent in the eight accent names "code", "crypt", "haven", "ai", "core", "explore", "calc", "green".
+
+The skin is "braid" or "amniscient" and the tone is "dark" or "light". `skin_saved()` returns the literal text "amniscient" when local storage key "amni_skin" holds exactly "amniscient", otherwise the literal "braid". `tone_saved()` reads local storage key "amni-theme"; when the key is missing it uses "dark" if the web module says the page prefers dark colors and "light" if it does not. It returns the literal text "light" when that value is exactly "light", otherwise the literal "dark". Both functions return literals, never a view of what they read.
+
+`apply_skin(skin, tone)` takes skin text and tone text. Any skin other than "amniscient" counts as "braid", and any tone other than "light" counts as "dark". It sets the attribute "data-skin" of the web module's root element to the skin and its attribute "data-theme" to the tone. On the body element it sets the attribute "data-skin" to the skin and "data-tone" to the tone, and sets the classes "skin-braid" (on when the skin is braid), "skin-amniscient" (on when it is amniscient), "theme-min" (on when it is amniscient) and "theme-product" (always on). It stores the skin under local storage key "amni_skin" and the tone under "amni-theme". It finds the first element matching the selector "meta[name=theme-color]" in the document and, when there is one, sets its attribute "content" to "#F3F2EF" for amniscient light, "#08090B" for amniscient dark, "#FBFAF8" for braid light and "#0A0B0E" for braid dark. When the element "amni-skin-braid" exists it sets its class "on" to whether the skin is braid; when "amni-skin-amniscient" exists it sets its class "on" to whether the skin is amniscient; when "amni-tone-toggle" exists it sets its text to "LIGHT" for the dark tone and "DARK" for the light tone.
+
+`set_skin(skin)` calls `apply_skin` with that skin and `tone_saved()`. `set_tone(tone)` calls `apply_skin` with `skin_saved()` and that tone. `boot_skin()` calls `apply_skin` with `skin_saved()` and `tone_saved()`. `toggle_tone()` works out the opposite of `tone_saved()` ("light" when it is "dark", otherwise "dark"), calls `set_tone` with it and returns that literal text.
+
+`set_toggle_label(tone)` sets the text of the element "theme-toggle" to "LIGHT" when the tone is exactly "dark" and to "DARK" otherwise. `toggle_theme()` calls `toggle_tone`, then `set_toggle_label` with its result, then stores the result under local storage key "theme".
+
+`boot_theme()` calls `boot_skin`. It then reads local storage key "theme", using key "amni-theme" instead when "theme" is missing or empty, and when that value is exactly "light" or exactly "dark" it calls `set_tone` with it. Last it calls `set_toggle_label` with `tone_saved()`.
+
+`strip_theme_classes()` reads the "className" property of the body element and removes from that text every run that starts with "theme-" and goes on to the next whitespace character or to the end, but only when at least one non-whitespace character follows "theme-". A "theme-" followed directly by whitespace or by the end of the text is left alone, and a removed run is not rescanned. Everything else, including whitespace, stays exactly as it was. It writes the result back to the "className" property of the body element.
+
+`accent_name(i)` returns the literal accent name at position i of the eight names, in the order given above. `accent_index(name)` returns the position of name among them, or minus 1 when it is not one of them.
+
+`apply_accent(name)` calls `strip_theme_classes`, then adds the body class "theme-" followed by the name unless the name is exactly "code", then sets the text of the element "theme-cycle" to the name in upper case (ASCII).
+
+`accent_step()` makes `accent_idx` one more, wrapping to 0 after the last name, calls `apply_accent` with that accent name, stores it under local storage key "accentTheme", and shows the toast "Accent: " followed by the name with its first letter in upper case, using `core::toast`.
+
+`boot_accent()` reads local storage key "accentTheme". When it is present and not empty it calls `apply_accent` with it. Then it sets `accent_idx` to `accent_index` of that value, using "code" when it is missing or empty, and to 0 when that is minus 1.
+
+`apply_amni_theme(name)` applies a named theme. When the name is exactly "braid" or exactly "amniscient" it removes the attribute "style" from the root element, calls `set_skin` with the name, sets the body attribute "data-amni-theme" to the name, stores the name under local storage key "amniTheme" and stops. Otherwise it looks the name up with `core::theme`, using the theme "jarvis" when the name is unknown, and for every member of that theme's "vars" object, walked with `json::each` (its block receives each child node as `it`, `json::name_of` of it is the CSS custom property such as "--bg" and `json::as_string` of it is the text value; `json::element` works only on arrays, never use it on an object), it sets that style property on the root element with the web module's `style`. Then it sets the body attribute "data-amni-theme" to the name as given, removes the root attribute "data-skin", and stores "legacy" under local storage key "amni_skin" and the name under "amniTheme".
+
+`cycle_amni_theme()` builds the ordered list of theme names: "braid", "amniscient", then every member name of the "amni_themes" object, walked with `json::each` (its block receives each child node as `it` and `json::name_of` of it is the member name; `json::element` works only on arrays, never use it on an object) (the member "amni_themes" of the root node `core::tables_root` of `core::tables`) in its stored order except "braid" and "amniscient". It reads local storage key "amniTheme", using key "amni_skin" when "amniTheme" is missing or empty and "braid" when that is missing or empty too. The next name is the one after the current name in the list, wrapping to the first name after the last; a current name that is not in the list counts as the first name, so the next is the second. It calls `apply_amni_theme` with the next name and shows the toast "Theme: " followed by that theme's "label" from `core::theme` when the theme exists, otherwise the name itself.
+
+`open_amni_ai()` posts the action "settings.server_check" with an empty argument using `core::post`, shows the toast "Opening Amni-AI (Adam) — :7700", then opens the address "http://127.0.0.1:7700/jarvis" with the web module's `open`.
+
+`boot_amni_theme()` reads local storage key "amni_skin". When it is exactly "braid" or "amniscient" it calls `apply_amni_theme` with it and stops. Otherwise it reads local storage key "amniTheme"; when that is exactly "braid" or "amniscient" it calls `apply_amni_theme` with it and stops. Otherwise, when that value is not empty and `core::theme` knows it, it calls `apply_amni_theme` with it, and when not it calls `boot_skin`.
+
+`health_done()` is called when the "/health" fetch ends. It takes the fetched body with `fetch_take` of `ev_id()` and frees it with `fetch_free`, parses the body as JSON into a local `json::Doc`, and when that parses and the root object has a "version" member that is a non-empty string it sets the text of the element "sb-ver", when it exists, to "Amni-Code v" followed by the version. Any failure does nothing.
+
+`init()` does these steps in order. It calls `boot_theme`. It starts `web::fetch` of "/health" with tag `T_HEALTH`. It calls `boot_accent`. It calls `boot_amni_theme`. It listens for "click" with no flags on the element "theme-toggle" with tag `T_TOGGLE`, on "theme-cycle" with tag `T_ACCENT` and on "menu-btn" with tag `T_MENU`. Last it sets the "value" property of the element "cfg-lang", when it exists, to `core::lang_code()`.
+
+`event(tag, kind)` handles the module's tags. `T_TOGGLE` calls `toggle_theme`, `T_ACCENT` calls `accent_step`, `T_MENU` posts the action "editor.palette" with an empty argument using `core::post`, and `T_HEALTH` calls `health_done` when the kind is `web::EV_FETCH`.
+
+`act(verb, arg)` handles the queued actions of this module. "skin" calls `set_skin` with the argument. "tone" calls `toggle_tone`. "theme_toggle" calls `toggle_theme`. "accent" calls `accent_step`. "theme" calls `apply_amni_theme` with the argument. "theme_cycle" calls `cycle_amni_theme`. "amni_ai" calls `open_amni_ai`. Any other verb does nothing.

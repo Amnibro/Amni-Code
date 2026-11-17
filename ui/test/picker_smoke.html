@@ -1,0 +1,7 @@
+<!doctype html><meta charset=utf-8><body>
+<div id="toast-container"></div>
+<div class="pane" id="pane-0"><button id="new-chat" onclick="window.__nc=(window.__nc||0)+1">n</button><button id="settings-btn" onclick="window.__sb=(window.__sb||0)+1">s</button>
+<div class="messages"><div class="welcome" id="welcome"><h2>Welcome</h2></div></div>
+<div class="input-area"><textarea id="input"></textarea><button id="interrupt" onclick="window.__int=(window.__int||0)+1" disabled>x</button></div></div>
+<div class="settings-panel"><h2>Settings</h2><label>Provider</label><select id="cfg-provider"><option value="amni">Adam</option><option value="anthropic">Anthropic</option></select><label>Model</label><select id="cfg-model"><option value="adam:8b">a8</option></select><select id="cfg-mode"><option value="plan">p</option><option value="edit">e</option><option value="autonomous">a</option></select></div>
+<script type=module>import {start} from './helium.js'; window.__log=[]; const l=console.log; console.log=(...a)=>{window.__log.push(a.join(' '));l(...a)}; start({wasm: 'ptest.wasm'});</script>

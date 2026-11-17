@@ -1,0 +1,29 @@
+use web
+use core
+use md
+use chat
+var NAME byte[>..]
+var ARG byte[>..]
+run():
+	while core::take(NAME, ARG):
+		if starts_with(NAME, "chat."):
+			chat::act(NAME[5..], ARG);
+main():
+	core::init()
+	chat::init()
+	web::listen(web::BODY, "click", 1, 0)
+	run();
+export he_event(tag i32, kind i32):
+	if tag == 1:
+		h i32 := web::closest(web::ev_target(), "[data-act]")
+		if h != 0:
+			a byte[>..] ~= []
+			g byte[>..] ~= []
+			web::get_attr(h, "data-act", a)
+			web::get_attr(h, "data-arg", g)
+			core::post_el(a, g, h)
+	else if tag < 100:
+		core::event(tag, kind)
+	else if tag >= 100 && tag < 200:
+		chat::event(tag, kind)
+	run();

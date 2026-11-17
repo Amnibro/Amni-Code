@@ -1,0 +1,36 @@
+use web
+use core
+use md
+use picker
+CLICK i32 := 1
+run_actions():
+	name byte[>..] ~= []
+	arg byte[>..] ~= []
+	while core::take(name, arg):
+		if starts_with(name, "picker."):
+			picker::act(name[7..], arg)
+		else if name == "settings.load":
+			web::log("posted settings.load")
+		else if name == "look.tone":
+			web::log("posted look.tone");
+export he_event(tag i32, kind i32):
+	if tag == CLICK:
+		t i32 := web::closest(web::ev_target(), "[data-act]")
+		if t != 0:
+			a byte[>..] ~= []
+			g byte[>..] ~= []
+			web::get_attr(t, "data-act", a)
+			web::get_attr(t, "data-arg", g)
+			core::post_el(a, g, t)
+			h byte[>..] ~= []
+			if web::get_attr(t, "href", h) && h == "#": web::ev_prevent()
+	else if tag >= 10 && tag < 100:
+		core::event(tag, kind)
+	else if tag >= 600 && tag < 700:
+		picker::event(tag, kind)
+	run_actions();
+main():
+	core::init()
+	picker::init()
+	web::listen(web::BODY, "click", CLICK, 0)
+	run_actions();

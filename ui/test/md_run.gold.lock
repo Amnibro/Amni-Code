@@ -1,0 +1,45 @@
+=== 2766a8763cd49e72
+use os
+use json
+main():
+	argv := args()
+	if argv.len < 2:
+		write_stderr("cannot read cases\n")
+		return
+	text byte[>..] ~= []
+	if !read_file(argv[1], text):
+		write_stderr("cannot read cases\n")
+		return
+	res byte[>..] ~= []
+	out byte[>..] ~= []
+	d ~= json::Doc{}
+	wd ~= json::Doc{}
+	for line split(text, '\n'):
+		if line.len == 0: continue
+		out.clear()
+		isnull ~= false
+		root, err := json::parse(line, d)
+		e0 := json::element(d, root, 0)
+		kind, k_ok := json::as_string(d, e0)
+		e1 := json::element(d, root, 1)
+		if kind == "size":
+			sz, s_ok := json::as_f64(d, e1)
+			md::fmt_size(out, sz)
+		else:
+			a1, a1_ok := json::as_string(d, e1)
+			if kind == "md": md::render(out, a1)
+			else if kind == "inl": md::inline(out, a1)
+			else if kind == "esc": md::esc(out, a1)
+			else if kind == "esc_html": md::esc_html(out, a1)
+			else if kind == "diff": md::diff_line(out, a1)
+			else if kind == "hl":
+				e2 := json::element(d, root, 2)
+				a2, a2_ok := json::as_string(d, e2)
+				if !md::hl(out, a1, a2): isnull = true
+			else if kind == "widget":
+				wroot, werr := json::parse(a1, wd)
+				md::widget(out, wd, wroot)
+		if isnull: res.append("null")
+		else: json::format_string(res, out)
+		res.push('\n')
+	write_stdout(res);

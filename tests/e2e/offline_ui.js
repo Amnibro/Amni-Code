@@ -8,7 +8,7 @@ const { chromium } = require('playwright');
   const external = [];
   page.on('request', r => { const u = r.url(); if (!/^(https?:\/\/(127\.0\.0\.1|localhost)(:\d+)?\/|data:|blob:)/.test(u)) external.push(u); });
   page.on('pageerror', e => console.log('pageerror:', e.message));
-  await page.goto(base, { waitUntil: 'networkidle' });
+  await page.goto(base, { waitUntil: 'load' });
   await page.waitForSelector('#amni-bar .ab-prov');
   const turn = async (prompt, n, liveShot) => {
     await page.fill('#input', prompt);

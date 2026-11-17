@@ -1,0 +1,34 @@
+use web
+use json
+into core.he
+lang he
+
+The module is namespace `core`. Every feature module of the Amni-Code page uses it. Tags below 100 belong to the root program and this module; feature modules own the hundreds (chat 100, settings 200, look 300, editor 400, panes 500, picker 600).
+
+`TOAST_FADE` is tag 10 and `TOAST_GONE` is tag 11. They are timer tags.
+
+`i18n` is a module json document parsed once by `init` from the embedded file "data/i18n.json". It maps a language code to an object of translation keys. `tables` is a module json document parsed once by `init` from the embedded file "data/tables.json". It has the objects "model_labels", "core_providers" and "amni_themes". Feature modules read `tables` directly with the json module.
+
+`lang` holds the current language code. It starts as "en".
+
+`t(out, key)` appends the translation of `key` in the current language. If that language lacks the key, it uses English. If English lacks it too, it appends the key itself.
+
+`apply_i18n()` sets the text of every element carrying a "data-i18n" attribute to the translation of that attribute's value. It sets the "placeholder" property of every element carrying "data-i18n-placeholder", and the "title" property of every element carrying "data-i18n-title", the same way.
+
+`set_lang(code)` makes `code` the current language and stores it in local storage under "amniLang". It sets the "dir" attribute of the web module's root element to "rtl" when the code is "ar", otherwise "ltr", then calls `apply_i18n`.
+
+`provider(id)` returns the node of `id` inside the "core_providers" object of `tables`, or -1 when there is none. `theme(name)` does the same inside "amni_themes".
+
+`model_label(out, model)` appends the label "model_labels" gives for `model`. When there is none, it appends the model with a leading "hf.co/" removed.
+
+Toasts all last 3000 milliseconds. `toast(msg)` creates a div with class "toast" and text `msg`, appends it to the element "toast-container", remembers its handle at the back of a fading queue and starts a 3000 millisecond timer with tag `TOAST_FADE`.
+
+`event(tag, kind)` handles this module's timer tags and returns whether it handled the event. On `TOAST_FADE` it takes the oldest handle from the fading queue, adds the class "fade-out", moves the handle to the back of a removal queue and starts a 250 millisecond timer with tag `TOAST_GONE`. On `TOAST_GONE` it takes the oldest handle from the removal queue, removes that element from the page and releases the handle.
+
+The action queue lets a module ask another module to do something without calling it directly. Each queued action has a name like "chat.undo", an argument text (often empty) and an element handle (0 when there is none). Keep the names and the arguments in growable byte buffers with an offsets list. Do not use an array of byte arrays, because Helium cannot index those. `post(name, arg)` queues an action with element 0. `post_el(name, arg, el)` queues one with an element. `take(name, arg)` clears both output buffers, moves the oldest queued action into them, sets the module variable `act_el` to its element and returns true. When the queue is empty, it returns false. The queue is first in, first out.
+
+`init()` parses both embedded documents. It reads "amniLang" from local storage into `lang` when present, sets the "dir" attribute exactly as `set_lang` does, then calls `apply_i18n`.
+
+Server-sent events arrive as stream chunks that callers append to a growable buffer. `sse_take(buf, event, data)` clears `event` and `data`, then looks for the first blank line, two newlines in a row, in `buf`. When there is none, it returns false and leaves `buf` alone. Otherwise it reads every line before that blank line. A line starting with "event:" sets `event` to the rest of the line with spaces trimmed. A line starting with "data:" adds the rest of the line with one leading space dropped, joining several data lines with a newline. Lines starting with a colon and all other lines are ignored. It then removes everything up to and including the blank line from the front of `buf`, by building the remainder in a separate buffer and copying it back, and returns true.
+
+`url_part(out, text)` appends `text` percent-encoded exactly like JavaScript's encodeURIComponent. Each byte that is an ASCII letter or digit or one of - _ . ! ~ * ' ( ) is kept. Every other byte of the UTF-8 text becomes a percent sign followed by its two uppercase hex digits.

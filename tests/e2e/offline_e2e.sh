@@ -47,4 +47,5 @@ assert "read_file" in names and "web_search" not in names and "web_fetch" not in
 assert ad[1]["body"]["messages"][-1]["role"] == "tool"
 print("stub checks ok: ollama text-protocol x2, adam native tools x2 (web tools filtered offline)")
 PY
+node "$HERE/ui_click.js" http://127.0.0.1:3199 "$OUT"
 echo "PASS (screenshots in $OUT)"

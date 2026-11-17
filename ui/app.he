@@ -1,0 +1,68 @@
+use core
+use md
+use chat
+use settings
+use look
+use editor
+use panes
+use picker
+use web
+CLICK := 1
+CHANGE := 2
+run_actions():
+	name byte[>..] ~= []
+	arg byte[>..] ~= []
+	while core::take(name, arg):
+		dot ~= -1
+		for i name.len:
+			if name[i] == '.' && dot < 0: dot = i
+		head := if dot < 0 { name[..] } else { name[..dot] }
+		verb := if dot < 0 { name[0..0] } else { name[dot + 1..] }
+		if head == "chat": chat::act(verb, arg)
+		else if head == "settings": settings::act(verb, arg)
+		else if head == "look": look::act(verb, arg)
+		else if head == "editor": editor::act(verb, arg)
+		else if head == "panes": panes::act(verb, arg)
+		else if head == "picker": picker::act(verb, arg)
+		else if head == "app" && verb == "lang": core::set_lang(arg);
+queue_attr(el i32, attr_name const byte[:], use_value bool):
+	if el <= 0: return
+	act byte[>..] ~= []
+	if !web::get_attr(el, attr_name, act): return
+	arg byte[>..] ~= []
+	if use_value:
+		web::get_prop(el, "value", arg)
+	else:
+		web::get_attr(el, "data-arg", arg)
+	core::post_el(act, arg, el)
+	if !use_value:
+		href byte[>..] ~= []
+		if web::get_attr(el, "href", href) && href == "#": web::ev_prevent()
+
+export fn he_event(tag i32, kind i32):
+	if tag == CLICK:
+		queue_attr(web::closest(web::ev_target(), "[data-act]"), "data-act", false)
+	else if tag == CHANGE:
+		queue_attr(web::closest(web::ev_target(), "[data-change]"), "data-change", true)
+	else if tag >= 10 && tag <= 99:
+		core::event(tag, kind)
+	else if tag >= 100:
+		owner := tag / 100
+		if owner == 1: chat::event(tag, kind)
+		else if owner == 2: settings::event(tag, kind)
+		else if owner == 3: look::event(tag, kind)
+		else if owner == 4: editor::event(tag, kind)
+		else if owner == 5: panes::event(tag, kind)
+		else if owner == 6: picker::event(tag, kind)
+	run_actions();
+main():
+	core::init()
+	look::init()
+	settings::init()
+	chat::init()
+	editor::init()
+	panes::init()
+	picker::init()
+	web::listen(web::BODY, "click", CLICK, 0)
+	web::listen(web::BODY, "change", CHANGE, 0)
+	run_actions();

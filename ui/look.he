@@ -1,0 +1,243 @@
+use web
+use core
+use json
+namespace look
+T_TOGGLE i32 := 301
+T_ACCENT i32 := 302
+T_MENU i32 := 303
+T_HEALTH i32 := 304
+accent_idx ~= 0
+skin_saved() const byte[:]:
+	s byte[>..] ~= []
+	if web::store_get("amni_skin", s) && s == "amniscient": return "amniscient"
+	return "braid"
+tone_saved() const byte[:]:
+	s byte[>..] ~= []
+	if !web::store_get("amni-theme", s):
+		if web::prefers_dark(): return "dark"
+		return "light"
+	if s == "light": return "light"
+	return "dark"
+apply_skin(skin const byte[:], tone const byte[:]):
+	braid := !(skin == "amniscient")
+	light := tone == "light"
+	sk := if braid { "braid" } else { "amniscient" }
+	tn := if light { "light" } else { "dark" }
+	web::attr(web::ROOT, "data-skin", sk)
+	web::attr(web::ROOT, "data-theme", tn)
+	web::attr(web::BODY, "data-skin", sk)
+	web::attr(web::BODY, "data-tone", tn)
+	web::cls(web::BODY, "skin-braid", braid)
+	web::cls(web::BODY, "skin-amniscient", !braid)
+	web::cls(web::BODY, "theme-min", !braid)
+	web::cls(web::BODY, "theme-product", true)
+	web::store_set("amni_skin", sk)
+	web::store_set("amni-theme", tn)
+	m i32 := web::query(web::DOCUMENT, "meta[name=theme-color]")
+	if m != 0:
+		color := if braid { if light { "#FBFAF8" } else { "#0A0B0E" } } else { if light { "#F3F2EF" } else { "#08090B" } }
+		web::attr(m, "content", color)
+	b i32 := web::el("amni-skin-braid")
+	if b != 0: web::cls(b, "on", braid)
+	a i32 := web::el("amni-skin-amniscient")
+	if a != 0: web::cls(a, "on", !braid)
+	t i32 := web::el("amni-tone-toggle")
+	if t != 0: web::text(t, if light { "DARK" } else { "LIGHT" });
+set_skin(skin const byte[:]):
+	apply_skin(skin, tone_saved());
+set_tone(tone const byte[:]):
+	apply_skin(skin_saved(), tone);
+boot_skin():
+	apply_skin(skin_saved(), tone_saved());
+toggle_tone() const byte[:]:
+	next := if tone_saved() == "dark" { "light" } else { "dark" }
+	set_tone(next)
+	next
+set_toggle_label(tone const byte[:]):
+	h i32 := web::el("theme-toggle")
+	if h != 0: web::text(h, if tone == "dark" { "LIGHT" } else { "DARK" });
+toggle_theme():
+	t := toggle_tone()
+	set_toggle_label(t)
+	web::store_set("theme", t);
+boot_theme():
+	boot_skin()
+	v byte[>..] ~= []
+	if !web::store_get("theme", v) || v.len == 0:
+		v.clear()
+		if !web::store_get("amni-theme", v): v.clear()
+	if v == "light" || v == "dark": set_tone(v)
+	set_toggle_label(tone_saved());
+is_ws(c byte) bool: c == 32 || c == 9 || c == 10 || c == 11 || c == 12 || c == 13
+strip_theme_classes():
+	s byte[>..] ~= []
+	web::get_prop(web::BODY, "className", s)
+	out byte[>..] ~= []
+	i ~= 0
+	while i < s.len:
+		if i + 6 < s.len && s[i..i + 6] == "theme-" && !is_ws(s[i + 6]):
+			j ~= i + 6
+			while j < s.len && !is_ws(s[j]): j += 1
+			i = j
+		else:
+			out.push(s[i])
+			i += 1
+	web::prop(web::BODY, "className", out);
+accent_name(i int) const byte[:]:
+	match i:
+		0 => "code"
+		1 => "crypt"
+		2 => "haven"
+		3 => "ai"
+		4 => "core"
+		5 => "explore"
+		6 => "calc"
+		7 => "green"
+		_ => "code"
+accent_index(name const byte[:]) int:
+	for i 8: if accent_name(i) == name: return i
+	return -1
+apply_accent(name const byte[:]):
+	strip_theme_classes()
+	if !(name == "code"):
+		c byte[>..] ~= []
+		c.append("theme-")
+		c.append(name)
+		web::cls(web::BODY, c, true)
+	up byte[>..] ~= []
+	up.append(name)
+	for &ch up: if ch >= 'a' && ch <= 'z': ch -= 32
+	h i32 := web::el("theme-cycle")
+	if h != 0: web::text(h, up);
+accent_step():
+	accent_idx = (accent_idx + 1) % 8
+	n := accent_name(accent_idx)
+	apply_accent(n)
+	web::store_set("accentTheme", n)
+	cap byte[>..] ~= []
+	cap.append(n)
+	if cap[0] >= 'a' && cap[0] <= 'z': cap[0] -= 32
+	msg byte[>..] ~= []
+	msg.append("Accent: ")
+	msg.append(cap)
+	core::toast(msg);
+boot_accent():
+	v byte[>..] ~= []
+	has := web::store_get("accentTheme", v) && v.len > 0
+	if has: apply_accent(v)
+	name byte[>..] ~= []
+	if has: name.append(v) else: name.append("code")
+	accent_idx = accent_index(name)
+	if accent_idx == -1: accent_idx = 0;
+apply_amni_theme(name const byte[:]):
+	if name == "braid" || name == "amniscient":
+		web::del_attr(web::ROOT, "style")
+		set_skin(name)
+		web::attr(web::BODY, "data-amni-theme", name)
+		web::store_set("amniTheme", name)
+		return
+	t ~= core::theme(name)
+	if t < 0: t = core::theme("jarvis")
+	vars := json::member(core::tables, t, "vars")
+	if vars >= 0:
+		json::each(core::tables, vars) { s, ok := json::as_string(core::tables, it); if ok { web::style(web::ROOT, json::name_of(core::tables, it), s) } }
+	web::attr(web::BODY, "data-amni-theme", name)
+	web::del_attr(web::ROOT, "data-skin")
+	web::store_set("amni_skin", "legacy")
+	web::store_set("amniTheme", name);
+cycle_amni_theme():
+	pool byte[>..] ~= []
+	ends int[>..] ~= []
+	pool.append("braid")
+	ends.push(pool.len)
+	pool.append("amniscient")
+	ends.push(pool.len)
+	themes := json::member(core::tables, core::tables_root, "amni_themes")
+	if themes >= 0:
+		json::each(core::tables, themes) { nm := json::name_of(core::tables, it); if !(nm == "braid") && !(nm == "amniscient") { pool.append(nm); ends.push(pool.len) } }
+	cur byte[>..] ~= []
+	if !web::store_get("amniTheme", cur) || cur.len == 0:
+		cur.clear()
+		if !web::store_get("amni_skin", cur) || cur.len == 0:
+			cur.clear()
+			cur.append("braid")
+	idx ~= 0
+	for k ends.len:
+		s := if k == 0 { 0 } else { ends[k - 1] }
+		if pool[s..ends[k]] == cur: idx = k
+	nxt := (idx + 1) % ends.len
+	s2 := if nxt == 0 { 0 } else { ends[nxt - 1] }
+	chosen byte[>..] ~= []
+	chosen.append(pool[s2..ends[nxt]])
+	apply_amni_theme(chosen)
+	msg byte[>..] ~= []
+	msg.append("Theme: ")
+	t := core::theme(chosen)
+	done ~= false
+	if t >= 0:
+		lb := json::member(core::tables, t, "label")
+		if lb >= 0:
+			ls, ok := json::as_string(core::tables, lb)
+			if ok:
+				msg.append(ls)
+				done = true
+	if !done: msg.append(chosen)
+	core::toast(msg);
+open_amni_ai():
+	core::post("settings.server_check", "")
+	core::toast("Opening Amni-AI (Adam) — :7700")
+	web::open("http://127.0.0.1:7700/jarvis");
+boot_amni_theme():
+	a byte[>..] ~= []
+	if web::store_get("amni_skin", a) && (a == "braid" || a == "amniscient"):
+		apply_amni_theme(a)
+		return
+	b byte[>..] ~= []
+	if web::store_get("amniTheme", b) && (b == "braid" || b == "amniscient"):
+		apply_amni_theme(b)
+		return
+	if b.len > 0 && core::theme(b) >= 0:
+		apply_amni_theme(b)
+	else:
+		boot_skin();
+health_done():
+	buf byte[>..] ~= []
+	web::fetch_take(web::ev_id(), buf)
+	web::fetch_free(web::ev_id())
+	d json::Doc ~= default<json::Doc>()
+	root, err := json::parse(buf, d)
+	if root < 0: return
+	if json::kind(d, root) != json::K_OBJ: return
+	v := json::member(d, root, "version")
+	if v < 0: return
+	s, ok := json::as_string(d, v)
+	if !ok || s.len == 0: return
+	e i32 := web::el("sb-ver")
+	if e != 0:
+		out byte[>..] ~= []
+		out.append("Amni-Code v")
+		out.append(s)
+		web::text(e, out);
+init():
+	boot_theme()
+	web::fetch("/health", T_HEALTH)
+	boot_accent()
+	boot_amni_theme()
+	web::listen(web::el("theme-toggle"), "click", T_TOGGLE, 0)
+	web::listen(web::el("theme-cycle"), "click", T_ACCENT, 0)
+	web::listen(web::el("menu-btn"), "click", T_MENU, 0)
+	e i32 := web::el("cfg-lang")
+	if e != 0: web::prop(e, "value", core::lang_code());
+event(tag i32, kind i32):
+	if tag == T_TOGGLE: toggle_theme()
+	if tag == T_ACCENT: accent_step()
+	if tag == T_MENU: core::post("editor.palette", "")
+	if tag == T_HEALTH && kind == web::EV_FETCH: health_done();
+act(verb const byte[:], arg const byte[:]):
+	if verb == "skin": set_skin(arg)
+	if verb == "tone": toggle_tone()
+	if verb == "theme_toggle": toggle_theme()
+	if verb == "accent": accent_step()
+	if verb == "theme": apply_amni_theme(arg)
+	if verb == "theme_cycle": cycle_amni_theme()
+	if verb == "amni_ai": open_amni_ai();

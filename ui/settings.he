@@ -1,0 +1,908 @@
+use web
+use json
+use core
+use md
+namespace settings
+let SETTINGS_BTN i32 = 200
+let OVERLAY i32 = 201
+let MODEL_CHANGE i32 = 202
+let PROVIDER_CHANGE i32 = 203
+let URL_CHANGE i32 = 204
+let MODEL_DIR_CHANGE i32 = 205
+let DIR_CHANGE i32 = 207
+let HF_KEY i32 = 208
+let F_CONFIG i32 = 210
+let F_SEATS i32 = 211
+let F_MODELS i32 = 212
+let F_DIRS i32 = 213
+let F_LS i32 = 214
+let F_SAVE i32 = 215
+let F_SAVE_MODELS i32 = 217
+let F_SAVE_CHECK i32 = 218
+let F_SRV_START i32 = 219
+let F_SRV_STATUS i32 = 220
+let F_HF_SEARCH i32 = 221
+let F_HF_FILES i32 = 222
+let F_HF_DL i32 = 223
+let F_HF_PROG i32 = 224
+let S_LOG i32 = 227
+let T_CLOSE i32 = 230
+let T_HF_POLL i32 = 231
+let T_HF_REFRESH i32 = 232
+let T_LOG i32 = 233
+var sb_base byte[>..]
+var ls_id i32 = -1
+var dirs_id i32 = -1
+var dirs_base byte[>..]
+var models_id i32 = -1
+var models_current byte[>..]
+var hf_files_id i32 = -1
+var hf_repo byte[>..]
+var seats json::Doc
+var seats_loaded bool = false
+var seats_arr int = -1
+var seat_p byte[>..]
+var hf_timer i32 = -1
+var log_on bool = false
+var log_id i32 = -1
+var log_timer i32 = -1
+var log_buf byte[>..]
+value_of(out byte[>..]&, id const byte[:]):
+	h i32 := web::el(id)
+	if h <= 0: return
+	web::get_prop(h, "value", out);
+set_value(id const byte[:], text const byte[:]):
+	web::prop(web::el(id), "value", text);
+show(id const byte[:], on bool):
+	web::style(web::el(id), "display", if on { "block" } else { "none" });
+reply(out byte[>..]&) int:
+	id i32 := web::ev_id()
+	web::fetch_take(id, out)
+	web::fetch_free(id)
+	status := web::ev_status()
+	status
+reply_json(d json::Doc&, why byte[>..]&) int:
+	body byte[>..] ~= []
+	status := reply(body)
+	why.clear()
+	if status == 0:
+		why.append(body)
+		return -1
+	root, err := json::parse(body, d)
+	if root < 0:
+		why.append(err)
+		return -1
+	root
+member_text(d json::Doc&, n int, key const byte[:]) const byte[:]:
+	if n < 0: return ""
+	m := json::member(d, n, key)
+	if m < 0: return ""
+	s, ok := json::as_string(d, m)
+	if !ok: return ""
+	s
+member_int(d json::Doc&, n int, key const byte[:]) int:
+	if n < 0: return 0
+	m := json::member(d, n, key)
+	if m < 0: return 0
+	v, ok := json::as_i64(d, m)
+	if ok: return v
+	f, fok := json::as_f64(d, m)
+	if fok: return f as! int
+	0
+member_real(d json::Doc&, n int, key const byte[:]) real:
+	if n < 0: return 0.0
+	m := json::member(d, n, key)
+	if m < 0: return 0.0
+	v, ok := json::as_f64(d, m)
+	if !ok: return 0.0
+	v
+member_true(d json::Doc&, n int, key const byte[:]) bool:
+	if n < 0: return false
+	m := json::member(d, n, key)
+	if m < 0: return false
+	v, ok := json::as_bool(d, m)
+	ok && v
+get_with(prefix const byte[:], value const byte[:], tag i32) i32:
+	url byte[>..] ~= []
+	url.append(prefix)
+	core::url_part(url, value)
+	web::fetch(url, tag)
+post_json(url const byte[:], body const byte[:], tag i32) i32:
+	web::request(url, "POST", "{\"Content-Type\":\"application/json\"}", body, tag, 0.0)
+path_sep(s const byte[:]) byte:
+	if contains(s, '/'): return '/'
+	return 92
+trim_seps(s const byte[:]) const byte[:]:
+	n ~= s.len
+	while n > 0 && (s[n - 1] == '/' || s[n - 1] == 92): n -= 1
+	s[..n]
+parent_of(path const byte[:], sep byte, out byte[>..]&) bool:
+	i ~= path.len - 1
+	while i >= 0 && !(path[i] == '/' || path[i] == 92): i -= 1
+	if i < 0: return false
+	if i == 0:
+		out.push(sep)
+		return true
+	for j i:
+		c := path[j]
+		out.push(if c == '/' || c == 92 { sep } else { c })
+	true
+join_path(out byte[>..]&, base const byte[:], sep byte, name const byte[:]):
+	n ~= base.len
+	if n > 0 && (base[n - 1] == '/' || base[n - 1] == 92): n -= 1
+	out.append(base[..n])
+	out.push(sep)
+	out.append(name);
+seat_render(p const byte[:]):
+	h i32 := web::el("seat-status")
+	found ~= -1
+	if seats_arr >= 0:
+		c := json::count(seats, seats_arr)
+		for i c:
+			e := json::element(seats, seats_arr, i)
+			if member_text(seats, e, "id") == p:
+				found = e
+				break
+	if found < 0:
+		web::html(h, "<span class=\"dim\">no seat info</span>")
+		return
+	label := member_text(seats, found, "label")
+	path := member_text(seats, found, "path")
+	hint := member_text(seats, found, "hint")
+	get := member_text(seats, found, "get")
+	out byte[>..] ~= []
+	if member_true(seats, found, "installed"):
+		out.append("<span class=\"seat-ok\">● ")
+		md::esc_html(out, label)
+		out.append(" found</span> <span class=\"dim\">")
+		md::esc_html(out, path)
+		out.append("</span><div class=\"dim\">")
+		md::esc_html(out, hint)
+		out.append("</div>")
+	else:
+		out.append("<span class=\"seat-no\">○ ")
+		md::esc_html(out, label)
+		out.append(" not installed</span><div class=\"dim\">get it: ")
+		md::esc_html(out, get)
+		out.append(" · ")
+		md::esc_html(out, hint)
+		out.append("</div>")
+	web::html(h, out);
+seat_status(p const byte[:]):
+	d i32 ~= web::el("seat-status")
+	if d <= 0:
+		d = web::create("div")
+		web::attr(d, "id", "seat-status")
+		web::cls(d, "seat-status", true)
+		prov i32 := web::el("cfg-provider")
+		if prov > 0:
+			nxt i32 := web::js_get(prov, "nextSibling")
+			web::insert_before(web::parent(prov), d, nxt)
+	e := core::provider(p)
+	if e < 0 || !member_true(core::tables, e, "cli"):
+		web::style(d, "display", "none")
+		return
+	web::style(d, "display", "block")
+	h byte[>..] ~= []
+	h.append("<span class=\"dim\">checking ")
+	md::esc_html(h, p)
+	h.append("…</span>")
+	web::html(d, h)
+	if seats_loaded:
+		seat_render(p)
+	else:
+		t byte[>..] ~= []
+		t.append(p)
+		seat_p.clear()
+		seat_p.append(t)
+		web::fetch("/api/seats", F_SEATS);
+on_seats():
+	why byte[>..] ~= []
+	root := reply_json(seats, why)
+	seats_arr = -1
+	if root >= 0:
+		m := json::member(seats, root, "seats")
+		if m >= 0 && json::kind(seats, m) == json::K_ARR: seats_arr = m
+	seats_loaded = true
+	seat_render(seat_p);
+apply_provider_chrome(p const byte[:]):
+	e ~= core::provider(p)
+	if e < 0: e = core::provider("local")
+	key := member_true(core::tables, e, "key") && !member_true(core::tables, e, "cli")
+	url := p == "local" || p == "ollama"
+	seat_status(p)
+	show("api-key-label", key)
+	show("cfg-key", key)
+	show("base-url-label", url)
+	show("cfg-url", url)
+	show("model-dir-section", p == "ollama");
+save_config(tag i32):
+	provider byte[>..] ~= []
+	model byte[>..] ~= []
+	key byte[>..] ~= []
+	url byte[>..] ~= []
+	dir byte[>..] ~= []
+	mode byte[>..] ~= []
+	mdir byte[>..] ~= []
+	value_of(provider, "cfg-provider")
+	value_of(model, "cfg-model")
+	value_of(key, "cfg-key")
+	value_of(url, "cfg-url")
+	value_of(dir, "cfg-dir")
+	value_of(mode, "cfg-mode")
+	value_of(mdir, "cfg-model-dir")
+	auto_on := web::has_cls(web::el("cfg-auto"), "on")
+	if starts_with(model, "Loading...") || starts_with(model, "(starting server...)") || starts_with(model, "(no models found)") || starts_with(model, "Error loading"): model.clear()
+	body byte[>..] ~= []
+	body.push('{')
+	json::format_key(body, "provider")
+	json::format_string(body, provider)
+	body.push(',')
+	json::format_key(body, "model")
+	json::format_string(body, model)
+	body.push(',')
+	json::format_key(body, "api_key")
+	json::format_string(body, key)
+	body.push(',')
+	json::format_key(body, "base_url")
+	json::format_string(body, url)
+	body.push(',')
+	json::format_key(body, "working_dir")
+	json::format_string(body, dir)
+	body.push(',')
+	json::format_key(body, "mode")
+	json::format_string(body, mode)
+	body.push(',')
+	json::format_key(body, "model_dir")
+	json::format_string(body, mdir)
+	body.push(',')
+	json::format_key(body, "auto_approve")
+	json::format_bool(body, auto_on)
+	body.push('}')
+	post_json("/api/config", body, tag);
+label_of(out byte[>..]&, m const byte[:]):
+	labels := json::member(core::tables, core::tables_root, "model_labels")
+	if labels >= 0:
+		l := member_text(core::tables, labels, m)
+		if l.len > 0:
+			out.append(l)
+			return
+	out.append(m);
+model_option(html byte[>..]&, m const byte[:]):
+	html.append("<option value=\"")
+	md::esc(html, m)
+	html.append("\">")
+	label byte[>..] ~= []
+	label_of(label, m)
+	md::esc_html(html, label)
+	html.append("</option>");
+array_has(d json::Doc&, arr int, name const byte[:]) bool:
+	if arr < 0: return false
+	c := json::count(d, arr)
+	for i c:
+		e := json::element(d, arr, i)
+		s, ok := json::as_string(d, e)
+		if ok && s == name: return true
+	false
+add_models(html byte[>..]&, d json::Doc&, arr int, skip_pinned bool):
+	if arr < 0: return
+	c := json::count(d, arr)
+	for i c:
+		e := json::element(d, arr, i)
+		s, ok := json::as_string(d, e)
+		if !ok: continue
+		if skip_pinned && (s == "adam:3b" || s == "adam:8b"): continue
+		model_option(html, s)
+load_models(current const byte[:]):
+	t byte[>..] ~= []
+	t.append(current)
+	models_current.clear()
+	models_current.append(t)
+	models_id = web::fetch("/api/models", F_MODELS);
+on_models():
+	id i32 := web::ev_id()
+	d json::Doc ~= json::Doc{..}
+	why byte[>..] ~= []
+	root := reply_json(d, why)
+	if id != models_id: return
+	sel i32 := web::el("cfg-model")
+	if root < 0:
+		web::html(sel, "<option>Error loading</option>")
+		return
+	marr := json::member(d, root, "models")
+	if marr < 0 || json::kind(d, marr) != json::K_ARR:
+		web::html(sel, "<option>Error loading</option>")
+		return
+	p byte[>..] ~= []
+	value_of(p, "cfg-provider")
+	list_core := json::count(d, marr) == 0
+	carr ~= -1
+	if list_core:
+		pe := core::provider(p)
+		if pe >= 0:
+			carr = json::member(core::tables, pe, "models")
+			if carr >= 0 && json::kind(core::tables, carr) != json::K_ARR: carr = -1
+		if carr < 0 || json::count(core::tables, carr) == 0:
+			hint := if p == "ollama" { "(pull a model: ollama pull llama3.2)" } else if p == "amni" { "(Adam on :7700)" } else { "(type a model id)" }
+			web::html(sel, str("<option value=\"\">", hint, "</option>"))
+			return
+	amni := p == "amni"
+	current := models_current[..]
+	opts byte[>..] ~= []
+	if amni:
+		model_option(opts, "adam:3b")
+		model_option(opts, "adam:8b")
+	has ~= false
+	if list_core:
+		add_models(opts, core::tables, carr, amni)
+		has = array_has(core::tables, carr, current)
+	else:
+		add_models(opts, d, marr, amni)
+		has = array_has(d, marr, current)
+	included := (amni && (current == "adam:3b" || current == "adam:8b")) || has
+	if current.len > 0 && included:
+		web::html(sel, opts)
+		web::prop(sel, "value", current)
+	else if current.len > 0 && !starts_with(current, "("):
+		h byte[>..] ~= []
+		h.append("<option value=\"")
+		md::esc(h, current)
+		h.append("\">")
+		md::esc_html(h, current)
+		h.append(" (custom)</option>")
+		h.append(opts)
+		web::html(sel, h)
+		web::prop(sel, "value", current)
+	else:
+		web::html(sel, opts)
+		first byte[>..] ~= []
+		if amni:
+			first.append("adam:3b")
+		else if list_core:
+			s, ok := json::as_string(core::tables, json::element(core::tables, carr, 0))
+			if ok: first.append(s)
+		else:
+			s, ok := json::as_string(d, json::element(d, marr, 0))
+			if ok: first.append(s)
+		web::prop(sel, "value", first)
+		save_config(F_SAVE)
+load_config():
+	web::fetch("/api/config", F_CONFIG);
+on_config():
+	d json::Doc ~= json::Doc{..}
+	why byte[>..] ~= []
+	c := reply_json(d, why)
+	if c < 0:
+		web::error(str("loadConfig: ", why))
+		return
+	cwd := member_text(d, c, "working_dir")
+	web::text(web::el("cwd-path"), if cwd.len > 0 { cwd } else { "unknown" })
+	if web::el("cfg-provider") > 0:
+		pt := member_text(d, c, "provider")
+		p := if core::provider(pt) >= 0 { pt } else { "amni" }
+		set_value("cfg-provider", p)
+		apply_provider_chrome(p)
+	apikey := member_text(d, c, "api_key")
+	set_value("cfg-key", apikey)
+	set_value("cfg-url", member_text(d, c, "base_url"))
+	set_value("cfg-dir", cwd)
+	mdir := member_text(d, c, "model_dir")
+	if mdir.len > 0: set_value("cfg-model-dir", mdir)
+	web::cls(web::el("cfg-auto"), "on", member_true(d, c, "auto_approve"))
+	mode := member_text(d, c, "mode")
+	set_value("cfg-mode", if mode.len > 0 { mode } else { "edit" })
+	if apikey.len > 0: web::text(web::el("key-src"), "(from ENV)")
+	load_models(member_text(d, c, "model"))
+	load_dirs(cwd)
+	load_sidebar(cwd);
+open_panel():
+	a i32 := web::el("settings-panel")
+	web::cls(a, "open", !web::has_cls(a, "open"))
+	b i32 := web::el("settings-overlay")
+	web::cls(b, "open", !web::has_cls(b, "open"))
+	load_config();
+close_panels():
+	web::cls(web::el("settings-panel"), "open", false)
+	web::cls(web::el("history-panel"), "open", false)
+	web::cls(web::el("settings-overlay"), "open", false)
+	save_config(F_SAVE);
+load_dirs(base const byte[:]):
+	t byte[>..] ~= []
+	t.append(base)
+	dirs_base.clear()
+	dirs_base.append(t)
+	dirs_id = get_with("/api/dirs?path=", t, F_DIRS);
+on_dirs():
+	id i32 := web::ev_id()
+	d json::Doc ~= json::Doc{..}
+	why byte[>..] ~= []
+	root := reply_json(d, why)
+	if id != dirs_id: return
+	if root < 0: return
+	arr := json::member(d, root, "dirs")
+	if arr < 0 || json::kind(d, arr) != json::K_ARR: return
+	list i32 := web::el("dir-tree")
+	c := json::count(d, arr)
+	if c == 0:
+		web::html(list, "<span style=\"color:var(--dim)\">No subdirectories</span>")
+		return
+	sep byte := path_sep(dirs_base)
+	h byte[>..] ~= []
+	full byte[>..] ~= []
+	for i c:
+		s, ok := json::as_string(d, json::element(d, arr, i))
+		if !ok: continue
+		full.clear()
+		join_path(full, dirs_base, sep, s)
+		h.append("<div class=\"dir-opt\" style=\"padding:2px 6px;cursor:pointer;border-radius:4px;color:var(--text2)\" data-act=\"settings.dir_pick\" data-arg=\"")
+		md::esc(h, full)
+		h.append("\">&#128193; ")
+		md::esc_html(h, s)
+		h.append("</div>")
+	web::html(list, h);
+dir_pick(full const byte[:]):
+	set_value("cfg-dir", full)
+	load_dirs(full)
+	load_sidebar(full);
+dir_up():
+	cur byte[>..] ~= []
+	value_of(cur, "cfg-dir")
+	t := trim_seps(cur)
+	if t.len == 0: return
+	par byte[>..] ~= []
+	if !parent_of(t, path_sep(t), par): return
+	set_value("cfg-dir", par)
+	load_dirs(par)
+	load_sidebar(par)
+	save_config(F_SAVE);
+load_sidebar(base const byte[:]):
+	t byte[>..] ~= []
+	t.append(base)
+	sb_base.clear()
+	sb_base.append(t)
+	if web::el("sidebar-tree") <= 0: return
+	ls_id = get_with("/api/ls?path=", t, F_LS);
+on_ls():
+	id i32 := web::ev_id()
+	d json::Doc ~= json::Doc{..}
+	why byte[>..] ~= []
+	root := reply_json(d, why)
+	if id != ls_id: return
+	tree i32 := web::el("sidebar-tree")
+	darr ~= -1
+	farr ~= -1
+	if root >= 0:
+		darr = json::member(d, root, "dirs")
+		farr = json::member(d, root, "files")
+		if darr >= 0 && json::kind(d, darr) != json::K_ARR: darr = -1
+		if farr >= 0 && json::kind(d, farr) != json::K_ARR: farr = -1
+	if darr < 0 || farr < 0:
+		web::html(tree, "<span style=\"color:var(--dim)\">Error</span>")
+		return
+	sep byte := path_sep(sb_base)
+	clean := trim_seps(sb_base)
+	h byte[>..] ~= []
+	h.append("<div class=\"sb-path\">")
+	md::esc_html(h, sb_base)
+	h.append("</div>")
+	par byte[>..] ~= []
+	if clean.len > 0 && parent_of(clean, sep, par):
+		h.append("<div class=\"sb-item sb-up\" data-act=\"settings.sb_dir\" data-arg=\"")
+		md::esc(h, par)
+		h.append("\">↑ ..</div>")
+	full byte[>..] ~= []
+	for i json::count(d, darr):
+		s, ok := json::as_string(d, json::element(d, darr, i))
+		if !ok: continue
+		full.clear()
+		join_path(full, clean, sep, s)
+		h.append("<div class=\"sb-item sb-dir\" data-act=\"settings.sb_dir\" data-arg=\"")
+		md::esc(h, full)
+		h.append("\">📁 ")
+		md::esc_html(h, s)
+		h.append("</div>")
+	for i json::count(d, farr):
+		s, ok := json::as_string(d, json::element(d, farr, i))
+		if !ok: continue
+		full.clear()
+		join_path(full, clean, sep, s)
+		h.append("<div class=\"sb-item sb-file\" data-act=\"settings.sb_file\" data-arg=\"")
+		md::esc(h, full)
+		h.append("\">")
+		md::esc_html(h, s)
+		h.append("</div>")
+	web::html(tree, h);
+server_log_line(text const byte[:], cls const byte[:]):
+	lg i32 := web::el("server-start-log")
+	d i32 := web::create("div")
+	if cls.len > 0: web::cls(d, cls, true)
+	web::text(d, text)
+	web::append(lg, d)
+	web::release(d)
+	web::prop_num(lg, "scrollTop", web::get_num(lg, "scrollHeight"));
+open_server_panel():
+	web::cls(web::el("server-start-overlay"), "open", true);
+stop_log():
+	log_on = false
+	if log_id >= 0:
+		web::fetch_abort(log_id)
+		log_id = -1
+	if log_timer >= 0:
+		web::clear_timer(log_timer)
+		log_timer = -1
+close_server_panel(reload bool):
+	web::cls(web::el("server-start-overlay"), "open", false)
+	stop_log()
+	if reload:
+		cur byte[>..] ~= []
+		value_of(cur, "cfg-model")
+		load_models(cur)
+log_stream():
+	log_buf.clear()
+	log_id = web::stream("/api/server-log", "GET", "{\"Accept\":\"text/event-stream\",\"Cache-Control\":\"no-cache\"}", "", S_LOG);
+log_open():
+	stop_log()
+	log_on = true
+	log_stream();
+on_log_chunk():
+	cid i32 := web::ev_id()
+	rid i32 := web::ev_status()
+	chunk byte[>..] ~= []
+	web::fetch_take(cid, chunk)
+	web::fetch_free(cid)
+	if !log_on || rid != log_id: return
+	log_buf.append(chunk)
+	event byte[>..] ~= []
+	data byte[>..] ~= []
+	while core::sse_take(log_buf, event, data):
+		if event == "ready":
+			server_log_line("Server is ready!", "log-ready")
+			web::style(web::el("server-start-spinner"), "animation", "none")
+			web::timer(1500, T_CLOSE);
+		else if event == "timeout":
+			server_log_line("Server failed to start after 3 minutes.", "log-err")
+			web::prop_bool(web::el("server-start-btn"), "disabled", false)
+		else if (event.len == 0 || event == "message") && data.len > 0:
+			server_log_line(data, if starts_with(data, "[err]") { "log-err" } else { "" })
+on_log_end():
+	id i32 := web::ev_id()
+	status := web::ev_status()
+	web::fetch_free(id)
+	if !log_on || id != log_id: return
+	log_id = -1
+	if status == 0 || status == 200:
+		log_timer = web::timer(3000, T_LOG)
+	else:
+		log_on = false
+on_log_timer():
+	log_timer = -1
+	if log_on:
+		log_stream()
+start_server():
+	web::prop_bool(web::el("server-start-btn"), "disabled", true)
+	web::html(web::el("server-start-log"), "")
+	server_log_line("Requesting server start...", "")
+	post_json("/api/server-start", "{}", F_SRV_START);
+on_server_start():
+	d json::Doc ~= json::Doc{..}
+	why byte[>..] ~= []
+	root := reply_json(d, why)
+	if root < 0:
+		server_log_line(str("Request failed: ", why), "log-err")
+		web::prop_bool(web::el("server-start-btn"), "disabled", false)
+		return
+	status := member_text(d, root, "status")
+	if status == "already_running":
+		server_log_line("Server is already running.", "log-ready")
+		web::timer(1200, T_CLOSE);
+		return
+	if status == "already_starting":
+		server_log_line("Server is already starting — watching logs...", "")
+	else if status == "error":
+		server_log_line(str("Error: ", member_text(d, root, "message")), "log-err")
+		web::prop_bool(web::el("server-start-btn"), "disabled", false)
+		return
+	else if status == "starting":
+		server_log_line(str("Launched: ", member_text(d, root, "dir")), "log-ready")
+	log_open();
+check_and_start():
+	web::fetch("/api/server-status", F_SRV_STATUS);
+on_server_status():
+	d json::Doc ~= json::Doc{..}
+	why byte[>..] ~= []
+	root := reply_json(d, why)
+	if root < 0:
+		load_models("")
+		return
+	if !member_true(d, root, "applicable") || member_true(d, root, "running"):
+		load_models("")
+		return
+	open_server_panel()
+	m := json::member(d, root, "matching")
+	if member_true(d, root, "reachable") && m >= 0 && json::kind(d, m) == json::K_BOOL && !member_true(d, root, "matching"):
+		server_log_line("Selected model differs from the running Amni-AI instance. Restarting with the saved selection...", "")
+	start_server();
+hf_search():
+	q byte[>..] ~= []
+	value_of(q, "hf-search-input")
+	t := trim(q)
+	if t.len == 0: return
+	web::html(web::el("hf-results"), "<span style=\"color:var(--dim)\">Searching...</span>")
+	web::html(web::el("hf-files"), "")
+	get_with("/api/hf/search?q=", t, F_HF_SEARCH);
+on_hf_search():
+	d json::Doc ~= json::Doc{..}
+	why byte[>..] ~= []
+	root := reply_json(d, why)
+	res i32 := web::el("hf-results")
+	if root < 0:
+		web::html(res, "<span style=\"color:var(--error)\">Search failed</span>")
+		return
+	if json::kind(d, root) != json::K_ARR || json::count(d, root) == 0:
+		web::html(res, "<span style=\"color:var(--dim)\">No GGUF models found</span>")
+		return
+	h byte[>..] ~= []
+	for i json::count(d, root):
+		m := json::element(d, root, i)
+		id := member_text(d, m, "id")
+		dl := member_int(d, m, "downloads")
+		likes := member_int(d, m, "likes")
+		h.append("<div class=\"hf-repo\" style=\"padding:6px 8px;cursor:pointer;border:1px solid var(--border);border-radius:6px;margin-bottom:4px;transition:border-color .2s\" data-act=\"settings.hf_files\" data-arg=\"")
+		md::esc(h, id)
+		h.append("\"><div style=\"font-weight:600;color:var(--text)\">")
+		md::esc_html(h, id)
+		h.append("</div><div style=\"color:var(--dim);font-size:11px\">&#11015; ")
+		if dl >= 1000:
+			h.append(str((dl + 500) / 1000, "k"))
+		else:
+			h.append(str(dl))
+		h.append(" downloads &middot; &hearts; ")
+		h.append(str(likes))
+		h.append("</div></div>")
+	web::html(res, h);
+hf_show_files(repo const byte[:]):
+	web::html(web::el("hf-files"), "<span style=\"color:var(--dim)\">Loading files...</span>")
+	t byte[>..] ~= []
+	t.append(repo)
+	hf_repo.clear()
+	hf_repo.append(t)
+	hf_files_id = get_with("/api/hf/files?repo=", t, F_HF_FILES);
+on_hf_files():
+	id i32 := web::ev_id()
+	d json::Doc ~= json::Doc{..}
+	why byte[>..] ~= []
+	root := reply_json(d, why)
+	if id != hf_files_id: return
+	el i32 := web::el("hf-files")
+	if root < 0:
+		web::html(el, "<span style=\"color:var(--error)\">Failed to load files</span>")
+		return
+	if json::kind(d, root) != json::K_ARR || json::count(d, root) == 0:
+		web::html(el, "<span style=\"color:var(--dim)\">No GGUF files in this repo</span>")
+		return
+	h byte[>..] ~= []
+	h.append("<div style=\"color:var(--accent);font-weight:600;margin-bottom:6px;font-size:11px\">GGUF FILES &mdash; ")
+	md::esc_html(h, hf_repo)
+	h.append("</div>")
+	for i json::count(d, root):
+		f := json::element(d, root, i)
+		name := member_text(d, f, "name")
+		h.append("<div style=\"display:flex;align-items:center;justify-content:space-between;padding:4px 8px;border:1px solid var(--border);border-radius:6px;margin-bottom:3px\"><div style=\"flex:1;min-width:0\"><div style=\"white-space:nowrap;overflow:hidden;text-overflow:ellipsis\" title=\"")
+		md::esc(h, name)
+		h.append("\">")
+		md::esc_html(h, name)
+		h.append("</div><div style=\"color:var(--dim);font-size:10px\">")
+		md::fmt_size(h, member_real(d, f, "size"))
+		h.append("</div></div><button data-act=\"settings.hf_download\" data-repo=\"")
+		md::esc(h, hf_repo)
+		h.append("\" data-arg=\"")
+		md::esc(h, name)
+		h.append("\" style=\"background:var(--accent);border:none;color:#fff;padding:4px 10px;border-radius:6px;cursor:pointer;font-family:var(--font);font-size:11px;flex-shrink:0;margin-left:8px\">Download</button></div>")
+	web::html(el, h);
+hf_clear_timer():
+	if hf_timer >= 0:
+		web::clear_timer(hf_timer)
+		hf_timer = -1
+hf_download(repo const byte[:], file const byte[:]):
+	web::style(web::el("hf-progress"), "display", "block")
+	web::text(web::el("hf-dl-name"), file)
+	web::text(web::el("hf-dl-pct"), "0%")
+	web::style(web::el("hf-dl-bar"), "width", "0%")
+	web::text(web::el("hf-dl-status"), "Starting download...")
+	body byte[>..] ~= []
+	body.push('{')
+	json::format_key(body, "repo")
+	json::format_string(body, repo)
+	body.push(',')
+	json::format_key(body, "file")
+	json::format_string(body, file)
+	body.push('}')
+	post_json("/api/hf/download", body, F_HF_DL);
+on_hf_dl():
+	st i32 := web::el("hf-dl-status")
+	d json::Doc ~= json::Doc{..}
+	why byte[>..] ~= []
+	root := reply_json(d, why)
+	if root < 0:
+		web::text(st, "Failed to start download")
+		return
+	status := member_text(d, root, "status")
+	path := member_text(d, root, "path")
+	if status == "exists":
+		web::text(st, str("Already downloaded: ", path))
+		web::style(web::el("hf-dl-bar"), "width", "100%")
+		web::text(web::el("hf-dl-pct"), "100%")
+		return
+	if status == "busy":
+		web::text(st, member_text(d, root, "message"))
+		return
+	web::text(st, str("Downloading to ", path))
+	hf_clear_timer()
+	hf_timer = web::timer(1000, T_HF_POLL);
+on_hf_poll():
+	hf_timer = web::timer(1000, T_HF_POLL)
+	web::fetch("/api/hf/progress", F_HF_PROG);
+on_hf_prog():
+	d json::Doc ~= json::Doc{..}
+	why byte[>..] ~= []
+	root := reply_json(d, why)
+	if root < 0: return
+	downloaded := member_real(d, root, "downloaded")
+	total := member_real(d, root, "total")
+	if total > 0.0:
+		pct := (downloaded / total * 100.0 + 0.5) as int
+		bar := str(pct, "%")
+		web::style(web::el("hf-dl-bar"), "width", bar)
+		web::text(web::el("hf-dl-pct"), bar)
+		s byte[>..] ~= []
+		md::fmt_size(s, downloaded)
+		s.append(" / ")
+		md::fmt_size(s, total)
+		web::text(web::el("hf-dl-status"), s)
+	if member_true(d, root, "done"):
+		hf_clear_timer()
+		err := member_text(d, root, "error")
+		st i32 := web::el("hf-dl-status")
+		if err.len > 0:
+			web::text(st, str("Error: ", err))
+			web::style(st, "color", "var(--error)")
+		else:
+			web::style(web::el("hf-dl-bar"), "width", "100%")
+			web::text(web::el("hf-dl-pct"), "100%")
+			web::text(st, "Download complete! Refreshing models...")
+			web::style(st, "color", "var(--accent)")
+			web::timer(1000, T_HF_REFRESH);
+add_hover_style():
+	s i32 := web::create("style")
+	web::text(s, ".dir-opt:hover{background:var(--surface2)!important;color:var(--accent)!important}.hf-repo:hover{border-color:var(--accent)!important}")
+	head i32 := web::query(web::DOCUMENT, "head")
+	web::append(head, s);
+init():
+	add_hover_style()
+	web::listen(web::el("settings-btn"), "click", SETTINGS_BTN, 0)
+	web::listen(web::el("settings-overlay"), "click", OVERLAY, 0)
+	web::listen(web::el("cfg-model"), "change", MODEL_CHANGE, 0)
+	web::listen(web::el("cfg-provider"), "change", PROVIDER_CHANGE, 0)
+	web::listen(web::el("cfg-url"), "change", URL_CHANGE, 0)
+	web::listen(web::el("cfg-model-dir"), "change", MODEL_DIR_CHANGE, 0)
+	web::listen(web::el("cfg-dir"), "change", DIR_CHANGE, 0)
+	web::listen(web::el("hf-search-input"), "keydown", HF_KEY, 0)
+	load_config();
+act(verb const byte[:], arg const byte[:]):
+	if verb == "open":
+		open_panel()
+	else if verb == "load":
+		load_config()
+	else if verb == "save":
+		save_config(F_SAVE)
+	else if verb == "auto_toggle":
+		a i32 := web::el("cfg-auto")
+		web::cls(a, "on", !web::has_cls(a, "on"))
+	else if verb == "server_close":
+		close_server_panel(false)
+	else if verb == "server_start":
+		start_server()
+	else if verb == "server_check":
+		check_and_start()
+	else if verb == "dir_up":
+		dir_up()
+	else if verb == "hf_search":
+		hf_search()
+	else if verb == "sidebar_refresh":
+		if sb_base.len > 0: load_sidebar(sb_base)
+	else if verb == "dir_pick":
+		dir_pick(arg)
+	else if verb == "sb_dir":
+		load_sidebar(arg)
+	else if verb == "sb_file":
+		core::post("editor.open", arg)
+	else if verb == "hf_files":
+		hf_show_files(arg)
+	else if verb == "hf_download":
+		repo byte[>..] ~= []
+		web::get_attr(core::act_el, "data-repo", repo)
+		hf_download(repo, arg);
+event(tag i32, kind i32):
+	if tag == SETTINGS_BTN:
+		open_panel()
+	else if tag == OVERLAY:
+		close_panels()
+	else if tag == MODEL_CHANGE:
+		p byte[>..] ~= []
+		value_of(p, "cfg-provider")
+		if p == "amni":
+			save_config(F_SAVE_CHECK)
+		else:
+			save_config(F_SAVE)
+	else if tag == PROVIDER_CHANGE:
+		p byte[>..] ~= []
+		value_of(p, "cfg-provider")
+		e ~= core::provider(p)
+		if e < 0: e = core::provider("amni")
+		u := member_text(core::tables, e, "url")
+		if u.len > 0: set_value("cfg-url", u)
+		apply_provider_chrome(p)
+		web::html(web::el("cfg-model"), "<option>Loading...</option>")
+		save_config(F_SAVE_MODELS)
+	else if tag == URL_CHANGE || tag == MODEL_DIR_CHANGE:
+		save_config(F_SAVE_MODELS)
+	else if tag == DIR_CHANGE:
+		save_config(F_SAVE)
+		d byte[>..] ~= []
+		value_of(d, "cfg-dir")
+		load_dirs(d)
+		load_sidebar(d)
+	else if tag == HF_KEY:
+		key byte[>..] ~= []
+		web::ev_key(key)
+		if key == "Enter":
+			web::ev_prevent()
+			hf_search()
+	else if tag == S_LOG:
+		if kind == web::EV_CHUNK:
+			on_log_chunk()
+		else if kind == web::EV_FETCH:
+			on_log_end()
+	else if kind == web::EV_FETCH:
+		if tag == F_CONFIG:
+			on_config()
+		else if tag == F_SEATS:
+			on_seats()
+		else if tag == F_MODELS:
+			on_models()
+		else if tag == F_DIRS:
+			on_dirs()
+		else if tag == F_LS:
+			on_ls()
+		else if tag == F_SAVE:
+			b byte[>..] ~= []
+			reply(b)
+		else if tag == F_SAVE_MODELS:
+			b byte[>..] ~= []
+			reply(b)
+			load_models("")
+		else if tag == F_SAVE_CHECK:
+			b byte[>..] ~= []
+			reply(b)
+			check_and_start()
+		else if tag == F_SRV_START:
+			on_server_start()
+		else if tag == F_SRV_STATUS:
+			on_server_status()
+		else if tag == F_HF_SEARCH:
+			on_hf_search()
+		else if tag == F_HF_FILES:
+			on_hf_files()
+		else if tag == F_HF_DL:
+			on_hf_dl()
+		else if tag == F_HF_PROG:
+			on_hf_prog()
+	else if kind == web::EV_TIMER:
+		if tag == T_CLOSE:
+			close_server_panel(true)
+		else if tag == T_HF_POLL:
+			on_hf_poll()
+		else if tag == T_HF_REFRESH:
+			load_models("")
+		else if tag == T_LOG:
+			on_log_timer();

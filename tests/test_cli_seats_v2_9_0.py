@@ -3,12 +3,15 @@
 Source-level checks (no build needed) plus a live pass against a running binary when
 AMNI_CODE_URL is set (e.g. http://127.0.0.1:3131). Run: python tests/test_cli_seats_v2_9_0.py
 """
-import os,sys,json,re,subprocess,urllib.request
+import os,sys,json,re,shutil,subprocess,tempfile,urllib.request
 from pathlib import Path
 ROOT=Path(__file__).resolve().parents[1]
 RS=(ROOT/'src'/'cli_seats.rs').read_text(encoding='utf-8')
 MAIN=(ROOT/'src'/'main.rs').read_text(encoding='utf-8')
 UI=(ROOT/'static'/'index.html').read_text(encoding='utf-8')
+HE={n:(ROOT/'ui'/(n+'.he')).read_text(encoding='utf-8') for n in ('md','chat','settings')}
+TABLES=json.loads((ROOT/'ui'/'data'/'tables.json').read_text(encoding='utf-8'))
+I18N=json.loads((ROOT/'ui'/'data'/'i18n.json').read_text(encoding='utf-8'))
 SEATS=('claude-code','codex','grok-cli','antigravity','copilot','cursor','opencode')
 FAILS=[]
 def ck(name,cond,detail=''):
@@ -34,14 +37,14 @@ def test_safety_flags():
 def test_ui():
     ck('provider picker has the subscription group','Subscription CLIs' in UI)
     for s in SEATS:ck('picker option '+s,'<option value="'+s+'">' in UI)
-    for s in SEATS:ck('CORE_PROVIDERS has '+s,re.search(r"[\'\"]?"+re.escape(s)+r"[\'\"]?:\{url:'',key:false,cli:true",UI) is not None)
-    ck('seat status line','async function seatStatus(p)' in UI and "fetch('/api/seats')" in UI)
-    ck('cli hides the key field','const showKey=!!c.key&&!c.cli' in UI)
-    ck('thinking lines stream to the bubble',"case 'thinking':\n              if(data.text)updateThinking(data.text);" in UI)
-    ck('renderMd is the ported engine','window.renderMd=t=>{try{return md(t)}' in UI and 'function renderMd(text){' not in UI)
-    ck('fences get a copy button','class="cb-copy" onclick="copyCode(this)"' in UI and 'window.copyCode=' in UI)
+    for s in SEATS:ck('core_providers has '+s,{k:TABLES['core_providers'].get(s,{}).get(k) for k in ('url','key','cli')}=={'url':'','key':False,'cli':True})
+    ck('seat status line','\nseat_status(p const byte[:]):' in HE['settings'] and 'web::fetch("/api/seats"' in HE['settings'])
+    ck('cli hides the key field',re.search(r'key := member_true\([^)]*"key"\) && !member_true\([^)]*"cli"\)',HE['settings']) is not None)
+    ck('thinking lines stream to the bubble',re.search(r'name == "thinking":\n\t+t := str_of\(ed, r, "text"\)\n\t+if t.len > 0: update_thinking\(t\)',HE['chat']) is not None)
+    ck('renderMd is the ported engine','md::render(' in HE['chat'] and 'renderMd' not in UI)
+    ck('fences get a copy button','class=\\"cb-copy\\"' in HE['md'] and '".cb-copy"' in HE['chat'] and 'web::clipboard(' in HE['chat'])
     ck('tables/blockquote/heading CSS on theme vars','.msg.assistant table{' in UI and '.msg.assistant blockquote{' in UI and '.msg.assistant h1{' in UI)
-    ck('inline sentinels survived',UI.count('')==2 and UI.count('')==2)
+    ck('inline sentinels survived','s[i] == 238 && i + 2 < n && s[i + 1] == 128 && s[i + 2] == 160' in HE['md'])
 def test_control_system():
     ck('control tokens',':root{--ctl-h:32px;--ctl-r:var(--radius,8px);--eyebrow:' in UI)
     ck('control block is last in the sheet',UI.rfind('/* v2.9.0 control system:')>UI.rfind('.interrupt-btn{background:#ff4444') and UI.rfind('/* v2.9.0 control system:')>UI.rfind('.settings-panel input,.settings-panel select{width:100%'))
@@ -51,18 +54,19 @@ def test_control_system():
     ck('composer buttons share one size','.interrupt-btn,.steer-btn,.send-btn{width:34px;height:34px;border-radius:var(--ctl-r)' in UI and '.interrupt-btn,.steer-btn{background:transparent;border:1px solid var(--border)' in UI)
     ck('status bar quiet and in flow','.status-bar{background:var(--panel);border-top:1px solid var(--border)' in UI and 'body{display:flex;flex-direction:column}body>.app{flex:1;min-height:0;height:auto}' in UI)
     ck('selects own their chrome','.settings-panel select,.pane-header select{appearance:none' in UI)
-    ck('agent mode labels translated','agent_mode:"Agent mode",agent_mode_desc:' in UI)
+    ck('agent mode labels translated',I18N['en'].get('agent_mode')=='Agent mode' and 'agent_mode_desc' in I18N['en'])
 def test_renderer_in_node():
-    m=re.search(r'\(function\(\)\{\nconst E=\{"&":"&amp;".*?window\.renderMd=t=>\{try\{return md\(t\)\}catch\(e\)\{return "<p>"\+esc\(t\)\+"</p>"\}\};\n\}\)\(\);',UI,re.S)
-    ck('renderer IIFE found',m is not None)
-    if not m:return
-    js=m.group(0)+'''
-const out=renderMd("# Title\\n\\nA **bold** line with `code` and 3 numbers 12 45.\\n\\n| a | b |\\n|---|:-:|\\n| 1 | 2 |\\n\\n- one\\n  - two\\n- [x] done\\n\\n```py\\ndef f(x):\\n    return x # hi\\n```\\n\\n> quoted\\n\\nhttps://example.com ok");
-console.log(JSON.stringify(out));'''
-    try:r=subprocess.run(['node','-e','globalThis.window=globalThis;'+js],capture_output=True,text=True,timeout=30)
-    except Exception as e:ck('node available',False,e);return
+    hc=os.environ.get('HC') or shutil.which('hc')
+    if not hc:print('  skip renderer (set HC to the Helium compiler)');return
+    sample="# Title\n\nA **bold** line with `code` and 3 numbers 12 45.\n\n| a | b |\n|---|:-:|\n| 1 | 2 |\n\n- one\n  - two\n- [x] done\n\n```py\ndef f(x):\n    return x # hi\n```\n\n> quoted\n\nhttps://example.com ok"
+    with tempfile.TemporaryDirectory() as d:
+        b=subprocess.run([hc,'build',str(ROOT/'ui'/'test'/'md_run.he'),'-o',d+'/md_run'],capture_output=True,text=True,timeout=300)
+        ck('md_run builds',b.returncode==0,b.stderr[-300:])
+        if b.returncode:return
+        Path(d+'/cases.txt').write_text(json.dumps(['md',sample])+'\n',encoding='utf-8')
+        r=subprocess.run([d+'/md_run',d+'/cases.txt'],capture_output=True,text=True,timeout=30)
     out=json.loads(r.stdout.strip() or '""') if r.returncode==0 else ''
-    ck('node ran the renderer',r.returncode==0,r.stderr[-300:])
+    ck('md_run ran the renderer',r.returncode==0,r.stderr[-300:])
     ck('heading',"<h1>Title</h1>" in out)
     ck('bold + inline code',"<strong>bold</strong>" in out and "<code>code</code>" in out)
     ck('digits untouched (sentinel bug guard)',"3 numbers 12 45." in out and out.count("<code>")==1)

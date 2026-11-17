@@ -1,0 +1,38 @@
+use web
+use core
+use settings
+main():
+	core::init()
+	settings::init()
+	web::listen(web::BODY, "click", 1, 0)
+	web::listen(web::BODY, "change", 2, 0);
+run_actions():
+	name byte[>..] ~= []
+	arg byte[>..] ~= []
+	while core::take(name, arg):
+		if starts_with(name, "settings."):
+			settings::act(name[9..], arg)
+		name.clear()
+		arg.clear();
+export fn he_event(tag i32, kind i32):
+	if tag == 1:
+		h i32 := web::closest(web::ev_target(), "[data-act]")
+		if h != 0:
+			act byte[>..] ~= []
+			arg byte[>..] ~= []
+			web::get_attr(h, "data-act", act)
+			web::get_attr(h, "data-arg", arg)
+			core::post_el(act, arg, h)
+	if tag == 2:
+		h i32 := web::closest(web::ev_target(), "[data-change]")
+		if h != 0:
+			act byte[>..] ~= []
+			arg byte[>..] ~= []
+			web::get_attr(h, "data-change", act)
+			web::get_prop(h, "value", arg)
+			core::post_el(act, arg, h)
+	if tag >= 10 && tag <= 99:
+		core::event(tag, kind)
+	if tag >= 200 && tag <= 299:
+		settings::event(tag, kind)
+	run_actions();

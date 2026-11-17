@@ -1,0 +1,692 @@
+=== -7a8a9c410b46cef0
+use web
+use json
+use core
+use md
+namespace picker
+=== -6d702cbc2cc5cb9e
+KEYS i32 := 600
+CLICKS i32 := 601
+CFG_FULL i32 := 602
+CFG_PART i32 := 603
+PROVS i32 := 604
+SERVERS i32 := 605
+MODELS i32 := 607
+SAVE_PLAIN i32 := 608
+SAVE_MODE i32 := 609
+SAVE_USE i32 := 610
+SAVE_OFFLINE i32 := 611
+FOCUS i32 := 612
+CHANGED i32 := 613
+DELAY i32 := 614
+FILTER i32 := 615
+OFFCHECK i32 := 617
+SHEET i32 := 618
+=== -321c8e2ee48150e9
+var cfg_doc json::Doc
+var cfg_root int = -1
+var prov_doc json::Doc
+var prov_root int = -1
+var srv_doc json::Doc
+var srv_root int = -1
+var mod_doc json::Doc
+var mod_root int = -1
+var scratch json::Doc
+var pend_mode byte[>..]
+var pend_provider byte[>..]
+var pend_model byte[>..]
+var pend_on bool = false
+=== 0f27e8613d6d5689
+adopt(text const byte[:], d json::Doc&, root int&) bool:
+	r, why := json::parse(text, scratch)
+	if r >= 0:
+		r2, why2 := json::parse(text, d)
+		root = r2
+		return true
+	return false
+=== -3412b1149e25f67e
+take_json(d json::Doc&, root int&) bool:
+	body byte[>..] ~= []
+	web::fetch_take(web::ev_id(), body)
+	web::fetch_free(web::ev_id())
+	st := web::ev_status()
+	return st >= 200 && st <= 299 && adopt(body, d, root)
+=== 1da147059e1222ab
+field(d json::Doc&, n int, key const byte[:]) const byte[:]:
+	if n < 0: return ""
+	m := json::member(d, n, key)
+	if m < 0: return ""
+	s, ok := json::as_string(d, m)
+	if !ok: return ""
+	return s
+flag(d json::Doc&, n int, key const byte[:]) bool:
+	if n < 0: return false
+	m := json::member(d, n, key)
+	if m < 0: return false
+	v, ok := json::as_bool(d, m)
+	return ok && v
+arr_node(d json::Doc&, n int, key const byte[:]) int:
+	if n < 0: return -1
+	return json::member(d, n, key)
+arr_len(d json::Doc&, a int) int:
+	if a < 0: return 0
+	return json::count(d, a)
+=== 4d2a8efa98018259
+cfg_str(key const byte[:]) const byte[:]: field(cfg_doc, cfg_root, key)
+cfg_on(key const byte[:]) bool: flag(cfg_doc, cfg_root, key)
+=== 62c325c9c6ad0fa9
+provider_node(id const byte[:]) int:
+	a := arr_node(prov_doc, prov_root, "providers")
+	for i arr_len(prov_doc, a):
+		e := json::element(prov_doc, a, i)
+		if field(prov_doc, e, "id") == id: return e
+	return -1
+is_cloud(id const byte[:]) bool:
+	n := provider_node(id)
+	return flag(prov_doc, n, "cloud")
+=== -65531b5daff33e07
+up_count() int:
+	a := arr_node(srv_doc, srv_root, "servers")
+	n ~= 0
+	for i arr_len(srv_doc, a):
+		if flag(srv_doc, json::element(srv_doc, a, i), "up"): n += 1
+	return n
+=== 4ace4e859fd10b6d
+label_of(out byte[>..]&, id const byte[:]):
+	if id == "amni":
+		out.append("Adam")
+	else if id == "ollama":
+		out.append("Ollama")
+	else if id == "local":
+		out.append("Local")
+	else if id == "openai":
+		out.append("OpenAI")
+	else if id == "anthropic":
+		out.append("Anthropic")
+	else if id == "google":
+		out.append("Gemini")
+	else if id == "xai":
+		out.append("xAI")
+	else:
+		out.append(id);
+=== 7e291d58c54c8c65
+model_or(out byte[>..]&, model const byte[:], fallback const byte[:]):
+	n := out.len
+	core::model_label(out, model)
+	if out.len == n: out.append(fallback);
+=== 25fb8be8692e32c3
+core_models(id const byte[:]) int:
+	p := core::provider(id)
+	if p < 0: return -1
+	return json::member(core::tables, p, "models")
+=== -6595b87fb98c3fd4
+matches(q const byte[:], s const byte[:]) bool:
+	if q.len == 0: return true
+	low byte[>..] ~= []
+	low.append(s)
+	to_lower(low)
+	lv const byte[:] := low
+	return find(lv, q) >= 0
+=== -2995895837c6874b
+add_row(h byte[>..]&, provider const byte[:], model const byte[:], base const byte[:], disabled bool, title const byte[:], badge const byte[:]):
+	active := cfg_str("provider") == provider && cfg_str("model") == model
+	h.append("<button type=\"button\" class=\"pk-row")
+	if active: h.append(" active")
+	h.append("\" data-act=\"picker.use\" data-provider=\"")
+	md::esc(h, provider)
+	h.append("\" data-model=\"")
+	md::esc(h, model)
+	h.append("\" data-base=\"")
+	md::esc(h, base)
+	h.append("\"")
+	if disabled: h.append(" disabled")
+	h.append(" title=\"")
+	if title.len > 0:
+		md::esc(h, title)
+	else:
+		md::esc(h, model)
+	h.append("\">")
+	h.append("<span class=\"pk-name\">")
+	tmp byte[>..] ~= []
+	core::model_label(tmp, model)
+	md::esc(h, tmp)
+	h.append("</span><span class=\"pk-meta\"></span>")
+	if badge.len > 0:
+		h.append("<span class=\"pk-badge ok\">")
+		md::esc(h, badge)
+		h.append("</span>")
+	if active: h.append("<span class=\"pk-check\">✓</span>")
+	h.append("</button>");
+=== -2a8f9a8722137b6c
+rows_of(h byte[>..]&, d json::Doc&, arr int, provider const byte[:], base const byte[:], disabled bool, title const byte[:], badge const byte[:], q const byte[:], limit int):
+	if arr < 0: return
+	n ~= 0
+	c := json::count(d, arr)
+	for i c:
+		if limit > 0 && n >= limit: break
+		e := json::element(d, arr, i)
+		s, ok := json::as_string(d, e)
+		if !ok: continue
+		if !matches(q, s): continue
+		add_row(h, provider, s, base, disabled, title, badge)
+		n += 1
+=== 7ded946df0c9e052
+filter_text(out byte[>..]&):
+	f i32 := web::el("pk-filter")
+	if f == 0: return
+	t byte[>..] ~= []
+	web::get_prop(f, "value", t)
+	to_lower(t)
+	out.append(t)
+	web::release(f);
+=== 15ba67353e6da948
+servers_html(h byte[>..]&, q const byte[:]):
+	h.append("<div class=\"pk-sec\">Local · works offline</div>")
+	sa := arr_node(srv_doc, srv_root, "servers")
+	sc := arr_len(srv_doc, sa)
+	if sc == 0: h.append("<div class=\"pk-note\">Scanning for local servers…</div>")
+	for i sc:
+		s := json::element(srv_doc, sa, i)
+		up := flag(srv_doc, s, "up")
+		h.append("<div class=\"pk-srv ")
+		if up:
+			h.append("up")
+		else:
+			h.append("down")
+		h.append("\"><span class=\"ab-dot ")
+		if up:
+			h.append("local")
+		else:
+			h.append("off")
+		h.append("\"></span><span>")
+		md::esc(h, field(srv_doc, s, "label"))
+		h.append("</span><span class=\"pk-url\">")
+		base := field(srv_doc, s, "base_url")
+		hp := find(base, "http://")
+		if hp >= 0:
+			md::esc(h, base[..hp])
+			md::esc(h, base[hp + 7..])
+		else:
+			md::esc(h, base)
+		h.append("</span><span class=\"pk-state\">")
+		ma := arr_node(srv_doc, s, "models")
+		mc := arr_len(srv_doc, ma)
+		if up:
+			format(h, mc, " model")
+			if mc != 1: h.push('s')
+		else:
+			h.append("not running")
+		h.append("</span></div>")
+		if up:
+			prov := field(srv_doc, s, "provider")
+			if mc == 0 && prov == "amni":
+				if matches(q, "adam:3b"): add_row(h, prov, "adam:3b", base, false, "", "offline")
+				if matches(q, "adam:8b"): add_row(h, prov, "adam:8b", base, false, "", "offline")
+			else:
+				rows_of(h, srv_doc, ma, prov, base, false, "", "offline", q, 0)
+	if sc > 0 && up_count() == 0: h.append("<div class=\"pk-note\">No local model server is running. Start Adam (Amni-AI, :7700) or <code>ollama serve</code> (:11434).</div>")
+=== -50580f74bb04591d
+suggested_html(h byte[>..]&):
+	h.append("<div class=\"pk-sec\">Suggested local models</div>")
+	a := arr_node(prov_doc, prov_root, "suggested_local")
+	for i arr_len(prov_doc, a):
+		m := json::element(prov_doc, a, i)
+		h.append("<div class=\"pk-sugg\"><div class=\"pk-sugg-t\"><b>")
+		md::esc(h, field(prov_doc, m, "label"))
+		h.append("</b><span class=\"pk-meta\">")
+		ctx ~= 0.0
+		cn := json::member(prov_doc, m, "context")
+		if cn >= 0:
+			v, ok := json::as_f64(prov_doc, cn)
+			if ok: ctx = v
+		format(h, (ctx / 1024.0) as int)
+		h.append("K context · ")
+		md::esc(h, field(prov_doc, m, "gguf"))
+		h.append("</span></div><div class=\"pk-cmd\"><code>ollama pull ")
+		ol := field(prov_doc, m, "ollama")
+		md::esc(h, ol)
+		h.append("</code><button type=\"button\" class=\"pk-copy\" data-act=\"picker.copy\" data-arg=\"ollama pull ")
+		md::esc(h, ol)
+		h.append("\">Copy</button><button type=\"button\" class=\"pk-use\" data-act=\"picker.use\" data-provider=\"ollama\" data-model=\"")
+		md::esc(h, ol)
+		h.append("\" data-base=\"http://127.0.0.1:11434\">Use</button></div></div>")
+=== 4ba5a87ba16710ee
+cloud_html(h byte[>..]&, q const byte[:]):
+	h.append("<div class=\"pk-sec\">Cloud · needs a key and internet</div>")
+	ids := ["anthropic", "openai", "google", "xai"]
+	for id ids:
+		pr := provider_node(id)
+		if pr < 0: continue
+		blocked := cfg_on("offline")
+		h.append("<div class=\"pk-prov\">")
+		md::esc(h, field(prov_doc, pr, "label"))
+		if flag(prov_doc, pr, "has_env_key"): h.append(" <span class=\"pk-badge ok\">key found</span>")
+		if blocked: h.append(" <span class=\"pk-badge warn\">off while offline</span>")
+		h.append("</div>")
+		base := field(prov_doc, pr, "default_base")
+		title := if blocked { "Turn Offline mode off to use cloud models" } else { "" }
+		ma := arr_node(mod_doc, mod_root, "models")
+		cm := core_models(id)
+		if cfg_str("provider") == id && arr_len(mod_doc, ma) >= 1:
+			rows_of(h, mod_doc, ma, id, base, blocked, title, "", q, 8)
+		else if arr_len(core::tables, cm) >= 1:
+			rows_of(h, core::tables, cm, id, base, blocked, title, "", q, 8)
+		else:
+			dm := field(prov_doc, pr, "default_model")
+			if dm.len > 0 && matches(q, dm): add_row(h, id, dm, base, blocked, title, "")
+=== -6cd99e040b668177
+render_picker():
+	p i32 := web::el("amni-picker")
+	if p == 0: return
+	q byte[>..] ~= []
+	filter_text(q)
+	h byte[>..] ~= []
+	h.append("<div class=\"pk-head\"><input id=\"pk-filter\" placeholder=\"Filter models…\" value=\"")
+	md::esc(h, q)
+	h.append("\" autocomplete=\"off\" aria-label=\"Filter models\"><button type=\"button\" class=\"pk-close\" data-act=\"picker.close\" title=\"Close (Esc)\">✕</button></div><div class=\"pk-body\">")
+	servers_html(h, q)
+	suggested_html(h)
+	cloud_html(h, q)
+	h.append("<div class=\"pk-foot\">")
+	src := field(mod_doc, mod_root, "source")
+	if src.len > 0:
+		h.append("Model list: ")
+		md::esc(h, src)
+	err := field(mod_doc, mod_root, "error")
+	if err.len > 0:
+		h.append(" (")
+		md::esc(h, err)
+		h.append(")")
+	h.append(" · <a href=\"#\" data-act=\"picker.settings\">All providers and keys</a></div></div>")
+	web::html(p, h)
+	web::listen(web::el("pk-filter"), "input", FILTER, 0);
+=== -34b296064b000af4
+filter_input():
+	sel := web::get_num(web::ev_target(), "selectionStart")
+	render_picker()
+	f i32 := web::el("pk-filter")
+	web::call(f, "focus")
+	web::prop_num(f, "selectionStart", sel)
+	web::prop_num(f, "selectionEnd", sel);
+=== -10653a4edebb2246
+open_picker():
+	p i32 ~= web::el("amni-picker")
+	if p == 0:
+		p = web::create("div")
+		web::attr(p, "id", "amni-picker")
+		web::attr(p, "class", "amni-picker")
+		web::attr(p, "role", "dialog")
+		web::attr(p, "aria-label", "Choose a model")
+		web::append(web::BODY, p)
+	web::cls(p, "open", true)
+	render_picker()
+	refresh(true)
+	web::timer(30.0, FOCUS);
+close_picker():
+	web::cls(web::el("amni-picker"), "open", false);
+toggle_picker():
+	p i32 := web::el("amni-picker")
+	if p != 0 && web::has_cls(p, "open"):
+		close_picker()
+	else:
+		open_picker()
+=== -4339ca0da6b7d38
+ensure_bar() i32:
+	b i32 := web::el("amni-bar")
+	if b != 0: return b
+	area i32 ~= web::query(web::DOCUMENT, "#pane-0 .input-area")
+	if area == 0: area = web::query(web::DOCUMENT, ".input-area")
+	if area == 0: return 0
+	bar i32 := web::create("div")
+	web::attr(bar, "id", "amni-bar")
+	web::attr(bar, "class", "amni-bar")
+	web::html(bar, "<button type=\"button\" class=\"ab-pill\" id=\"ab-model\" data-act=\"picker.toggle\" title=\"Choose provider and model (Ctrl+K)\" aria-haspopup=\"dialog\"><span class=\"ab-dot\"></span><span class=\"ab-prov\"></span><span class=\"ab-model\"></span><span class=\"ab-caret\">▾</span></button><button type=\"button\" class=\"ab-chip\" id=\"ab-offline\" data-act=\"picker.offline\" title=\"Offline mode: local models only, no web tools (Ctrl+Shift+O)\" aria-pressed=\"false\"><span class=\"ab-led\"></span><span class=\"ab-off-label\">Online</span></button><div class=\"ab-mode\" role=\"group\" aria-label=\"Agent mode\"><button type=\"button\" data-act=\"picker.mode\" data-arg=\"plan\" data-mode=\"plan\" title=\"Plan: propose, never change files\">Plan</button><button type=\"button\" data-act=\"picker.mode\" data-arg=\"edit\" data-mode=\"edit\" title=\"Edit: apply changes\">Edit</button><button type=\"button\" data-act=\"picker.mode\" data-arg=\"autonomous\" data-mode=\"autonomous\" title=\"Autonomous: run everything\">Auto</button></div><span class=\"ab-spacer\"></span><button type=\"button\" class=\"ab-help\" id=\"ab-help\" data-act=\"picker.shortcuts\" title=\"Keyboard shortcuts (?)\">Shortcuts <kbd>?</kbd></button>")
+	web::append(area, bar)
+	return bar
+=== -6ed9cb459fdf1930
+render_welcome():
+	w i32 := web::el("welcome")
+	if w == 0: return
+	card i32 ~= web::el("amni-status-card")
+	if card == 0:
+		card = web::create("div")
+		web::attr(card, "id", "amni-status-card")
+		web::attr(card, "class", "amni-status-card")
+		web::append(w, card)
+	h byte[>..] ~= []
+	h.append("<div class=\"sc-line\">")
+	sa := arr_node(srv_doc, srv_root, "servers")
+	sc := arr_len(srv_doc, sa)
+	if sc == 0:
+		h.append("<span class=\"ab-dot off\"></span> Checking for local model servers…")
+	else if up_count() > 0:
+		h.append("<span class=\"ab-dot local\"></span> Local model server")
+		if up_count() > 1: h.push('s')
+		h.append(": ")
+		first ~= true
+		for i sc:
+			s := json::element(srv_doc, sa, i)
+			if !flag(srv_doc, s, "up"): continue
+			if !first: h.append(" · ")
+			first = false
+			h.append("<b>")
+			md::esc(h, field(srv_doc, s, "label"))
+			h.append("</b> (")
+			format(h, arr_len(srv_doc, arr_node(srv_doc, s, "models")))
+			h.push(')')
+	else:
+		h.append("<span class=\"ab-dot off\"></span> No local model server found. Start Adam (:7700) or Ollama (:11434), or <a href=\"#\" data-act=\"picker.open\">pick a cloud model</a>.")
+	h.append("</div><div class=\"sc-sub\">Using <b>")
+	prov := cfg_str("provider")
+	tmp byte[>..] ~= []
+	if prov.len == 0:
+		tmp.append("…")
+	else:
+		label_of(tmp, prov)
+	md::esc(h, tmp)
+	h.append("</b> · ")
+	tmp.clear()
+	model_or(tmp, cfg_str("model"), "no model")
+	md::esc(h, tmp)
+	if cfg_on("offline"): h.append(" · <span class=\"sc-off\">offline</span>")
+	h.append(" · <a href=\"#\" data-act=\"picker.open\">change</a> <kbd>Ctrl</kbd><kbd>K</kbd></div>")
+	web::html(card, h);
+=== 621b0a354705cd14
+render_settings_toggle():
+	prov i32 := web::el("cfg-provider")
+	if prov == 0: return
+	if web::el("cfg-offline-row") == 0:
+		row i32 := web::create("div")
+		web::attr(row, "id", "cfg-offline-row")
+		web::attr(row, "class", "cfg-offline-row")
+		web::html(row, "<label class=\"cfg-off-label\"><input type=\"checkbox\" id=\"cfg-offline\"> Offline mode</label><p class=\"toggle-desc\">Local models only. Cloud providers, web_search, web_fetch, model downloads and update checks are switched off, with a clear message instead of a timeout.</p>")
+		par i32 := web::parent(prov)
+		prev i32 := web::js_get(prov, "previousElementSibling")
+		web::insert_before(par, row, prev)
+		web::listen(web::el("cfg-offline"), "change", OFFCHECK, 0)
+	web::prop_bool(web::el("cfg-offline"), "checked", cfg_on("offline"));
+=== -3012ad075bb0be51
+render():
+	bar i32 := ensure_bar()
+	if bar == 0 || cfg_root < 0: return
+	provider := cfg_str("provider")
+	on := cfg_on("offline")
+	cloud := is_cloud(provider)
+	pa := arr_node(prov_doc, prov_root, "providers")
+	seat := arr_len(prov_doc, pa) >= 1 && provider_node(provider) < 0
+	dot i32 := web::query(bar, ".ab-dot")
+	if seat:
+		web::attr(dot, "class", "ab-dot seat")
+	else if cloud:
+		web::attr(dot, "class", "ab-dot cloud")
+	else:
+		web::attr(dot, "class", "ab-dot local")
+	tmp byte[>..] ~= []
+	label_of(tmp, provider)
+	web::text(web::query(bar, ".ab-prov"), tmp)
+	tmp.clear()
+	model_or(tmp, cfg_str("model"), "choose a model")
+	web::text(web::query(bar, ".ab-model"), tmp)
+	chip i32 := web::query(bar, "#ab-offline")
+	web::cls(chip, "on", on)
+	web::attr(chip, "aria-pressed", if on { "true" } else { "false" })
+	web::text(web::query(chip, ".ab-off-label"), if on { "Offline" } else { "Online" })
+	mode ~= cfg_str("mode")
+	if mode.len == 0: mode = "edit"
+	cnt i32 := web::query_all(bar, ".ab-mode button")
+	for i cnt:
+		b i32 := web::list_at(i as i32)
+		a byte[>..] ~= []
+		web::get_attr(b, "data-mode", a)
+		web::cls(b, "on", a == mode)
+	web::cls(web::BODY, "amni-offline", on)
+	warn := on && cloud
+	web::cls(bar, "warn", warn)
+	web::prop(web::query(bar, "#ab-model"), "title", if warn { "Offline mode is on but a cloud provider is selected: pick a local model" } else { "Choose provider and model (Ctrl+K)" })
+	render_welcome()
+	render_settings_toggle()
+	if web::query(web::DOCUMENT, "#amni-picker.open") != 0: render_picker()
+=== 7766ea92e769b221
+refresh(full bool):
+	t i32 := if full { CFG_FULL } else { CFG_PART }
+	web::fetch("/api/config", t);
+=== 36d1c1b2491ec300
+on_config(tag i32):
+	if !take_json(cfg_doc, cfg_root): return
+	pa := arr_node(prov_doc, prov_root, "providers")
+	need := tag == CFG_FULL || arr_len(prov_doc, pa) == 0
+	url := if need { "/api/providers" } else { "/api/models" }
+	t i32 := if need { PROVS } else { MODELS }
+	web::fetch(url, t);
+=== -29fec5f222f3e7b5
+on_providers():
+	take_json(prov_doc, prov_root)
+	web::fetch("/api/local-servers", SERVERS);
+=== 4fbdbeeaed38a1d6
+on_servers():
+	if !take_json(srv_doc, srv_root): srv_root = -1
+	web::fetch("/api/models", MODELS);
+=== -6ecadb0dd92adb6d
+on_models():
+	take_json(mod_doc, mod_root)
+	render();
+=== 6d366376a752444a
+save_cfg(tag i32, body const byte[:]):
+	web::request("/api/config", "POST", "{\"Content-Type\":\"application/json\"}", body, tag, 0.0);
+=== -14784581266ac2af
+save_offline(on bool, tag i32):
+	pend_on = on
+	b byte[>..] ~= []
+	b.append("{\"offline\":")
+	json::format_bool(b, on)
+	b.push('}')
+	save_cfg(tag, b);
+=== 0ee92fd072c309f2
+save_mode(mode const byte[:]):
+	pend_mode.clear()
+	pend_mode.append(mode)
+	b byte[>..] ~= []
+	b.append("{\"mode\":")
+	json::format_string(b, mode)
+	b.push('}')
+	save_cfg(SAVE_MODE, b);
+=== 142109d418fc2fec
+save_use(provider const byte[:], model const byte[:], base const byte[:]):
+	pend_provider.clear()
+	pend_provider.append(provider)
+	pend_model.clear()
+	pend_model.append(model)
+	b byte[>..] ~= []
+	b.append("{\"provider\":")
+	json::format_string(b, provider)
+	b.append(",\"model\":")
+	json::format_string(b, model)
+	if base.len > 0:
+		b.append(",\"base_url\":")
+		json::format_string(b, base)
+	b.push('}')
+	save_cfg(SAVE_USE, b);
+=== 6b9ee61fad0bbb85
+toggle_offline():
+	save_offline(!cfg_on("offline"), SAVE_OFFLINE);
+=== -3908cb2bb7ad2b0b
+on_saved(tag i32):
+	if !take_json(cfg_doc, cfg_root): return
+	core::post("settings.load", "")
+	render()
+	if tag == SAVE_MODE:
+		m i32 := web::el("cfg-mode")
+		if m != 0: web::prop(m, "value", pend_mode)
+	else if tag == SAVE_USE:
+		sel i32 := web::el("cfg-model")
+		if sel != 0:
+			opts i32 := web::query_all(sel, "option")
+			found ~= false
+			for i opts:
+				o i32 := web::list_at(i as i32)
+				v byte[>..] ~= []
+				web::get_prop(o, "value", v)
+				if v == pend_model: found = true
+			if !found:
+				o2 i32 := web::create("option")
+				web::prop(o2, "value", pend_model)
+				web::text(o2, pend_model)
+				web::append(sel, o2)
+			web::prop(sel, "value", pend_model)
+		close_picker()
+		t byte[>..] ~= []
+		t.append("Using ")
+		label_of(t, pend_provider)
+		t.append(" · ")
+		core::model_label(t, pend_model)
+		core::toast(t)
+		refresh(false)
+	else if tag == SAVE_OFFLINE:
+		if pend_on:
+			core::toast("Offline mode on: cloud providers and web tools are disabled")
+		else:
+			core::toast("Offline mode off")
+=== 2459c5be76127444
+key_row(h byte[>..]&, key const byte[:], desc const byte[:]):
+	h.append("<div class=\"ak-row\"><kbd>")
+	md::esc(h, key)
+	h.append("</kbd><span>")
+	md::esc(h, desc)
+	h.append("</span></div>");
+show_shortcuts():
+	k i32 ~= web::el("amni-keys")
+	if k == 0:
+		k = web::create("div")
+		web::attr(k, "id", "amni-keys")
+		web::attr(k, "class", "amni-keys")
+		web::attr(k, "role", "dialog")
+		web::attr(k, "aria-label", "Keyboard shortcuts")
+		h byte[>..] ~= []
+		h.append("<div class=\"ak-box\"><div class=\"ak-head\">Keyboard shortcuts<button type=\"button\" class=\"pk-close\" title=\"Close\">✕</button></div>")
+		key_row(h, "Ctrl/⌘ K", "Choose provider and model")
+		key_row(h, "Ctrl/⌘ Shift O", "Toggle Offline mode")
+		key_row(h, "Ctrl/⌘ Shift L", "Toggle light / dark")
+		key_row(h, "Ctrl/⌘ Shift P", "Command palette")
+		key_row(h, "Ctrl/⌘ P", "Quick open file")
+		key_row(h, "Ctrl/⌘ ,", "Settings")
+		key_row(h, "Ctrl/⌘ Shift N", "New chat")
+		key_row(h, "Enter · Shift Enter", "Send · new line")
+		key_row(h, "/", "Focus the prompt")
+		key_row(h, "?", "This list")
+		key_row(h, "Esc", "Close panels, stop generation")
+		h.append("</div>")
+		web::html(k, h)
+		web::listen(k, "click", SHEET, 0)
+		web::append(web::BODY, k)
+	web::cls(k, "open", true);
+=== 414d774f812c023c
+sheet_click():
+	k i32 := web::el("amni-keys")
+	t i32 := web::ev_target()
+	if web::same(t, k) || web::closest(t, ".pk-close") != 0: web::cls(k, "open", false);
+=== 45c2271664fa2442
+typing(target i32) bool:
+	t byte[>..] ~= []
+	web::get_prop(target, "tagName", t)
+	if t == "INPUT" || t == "TEXTAREA" || t == "SELECT": return true
+	return web::get_bool(target, "isContentEditable")
+=== -19597d03d8505e9b
+on_key():
+	key byte[>..] ~= []
+	web::ev_key(key)
+	mods := web::ev_mods()
+	cmd := (mods & (web::CTRL | web::META)) != 0
+	shift := (mods & web::SHIFT) != 0
+	k byte[>..] ~= []
+	k.append(key)
+	to_lower(k)
+	if cmd && !shift && k == "k":
+		web::ev_prevent()
+		toggle_picker()
+	else if cmd && shift && k == "o":
+		web::ev_prevent()
+		toggle_offline()
+	else if cmd && shift && k == "l":
+		web::ev_prevent()
+		core::post("look.tone", "")
+	else if cmd && shift && k == "n":
+		web::ev_prevent()
+		web::call(web::el("new-chat"), "click")
+	else if cmd && k == ",":
+		web::ev_prevent()
+		web::call(web::el("settings-btn"), "click")
+	else if key == "Escape":
+		close_picker()
+		web::cls(web::el("amni-keys"), "open", false)
+		intr i32 := web::el("interrupt")
+		if intr != 0 && !web::get_bool(intr, "disabled"): web::call(intr, "click")
+	else if !cmd && !typing(web::ev_target()) && key == "?":
+		web::ev_prevent()
+		show_shortcuts()
+	else if !cmd && !typing(web::ev_target()) && key == "/":
+		web::ev_prevent()
+		web::call(web::el("input"), "focus")
+=== -5e2a72e5bd429898
+outside_click():
+	pk i32 := web::query(web::DOCUMENT, "#amni-picker.open")
+	if pk == 0: return
+	t i32 := web::ev_target()
+	if !web::contains(pk, t) && web::closest(t, "#ab-model") == 0 && web::closest(t, "[data-act='picker.open']") == 0: close_picker();
+=== -59ca7906c36c6e4a
+act(verb const byte[:], arg const byte[:]):
+	if verb == "open":
+		open_picker()
+	else if verb == "close":
+		close_picker()
+	else if verb == "toggle":
+		toggle_picker()
+	else if verb == "offline":
+		toggle_offline()
+	else if verb == "shortcuts":
+		show_shortcuts()
+	else if verb == "refresh":
+		refresh(arg == "full")
+	else if verb == "settings":
+		close_picker()
+		web::call(web::el("settings-btn"), "click")
+	else if verb == "copy":
+		web::clipboard(arg)
+		web::text(core::act_el, "Copied")
+	else if verb == "use":
+		e i32 := core::act_el
+		if web::get_bool(e, "disabled"): return
+		p byte[>..] ~= []
+		if !web::get_attr(e, "data-provider", p) || p.len == 0: return
+		m byte[>..] ~= []
+		web::get_attr(e, "data-model", m)
+		b byte[>..] ~= []
+		web::get_attr(e, "data-base", b)
+		save_use(p, m, b)
+	else if verb == "mode":
+		save_mode(arg)
+=== 00f2df1e772c5c08
+event(tag i32, kind i32):
+	if tag == KEYS: on_key()
+	if tag == CLICKS: outside_click()
+	if tag == CHANGED: web::timer(400.0, DELAY)
+	if tag == DELAY: refresh(false)
+	if tag == FOCUS: web::call(web::el("pk-filter"), "focus")
+	if tag == FILTER: filter_input()
+	if tag == OFFCHECK: save_offline(web::ev_checked(), SAVE_PLAIN)
+	if tag == SHEET: sheet_click()
+	if kind == web::EV_FETCH:
+		if tag == CFG_FULL || tag == CFG_PART: on_config(tag)
+		if tag == PROVS: on_providers()
+		if tag == SERVERS: on_servers()
+		if tag == MODELS: on_models()
+		if tag == SAVE_PLAIN || tag == SAVE_MODE || tag == SAVE_USE || tag == SAVE_OFFLINE: on_saved(tag)
+=== 174fe117d134f7ec
+init():
+	ensure_bar()
+	refresh(true)
+	web::listen(web::DOCUMENT, "keydown", KEYS, 0)
+	web::listen(web::DOCUMENT, "click", CLICKS, 0)
+	p i32 := web::el("cfg-provider")
+	if p != 0: web::listen(p, "change", CHANGED, 0)
+	m i32 := web::el("cfg-model")
+	if m != 0: web::listen(m, "change", CHANGED, 0)

@@ -1,0 +1,43 @@
+// Clicks through the Helium UI (skin, tone, settings, language, history, editor, palette, quick open, panes, shortcuts) and fails on page errors or non-loopback requests.
+// usage: node ui_click.js <base-url> <screenshot-dir>
+const { chromium } = require('playwright');
+(async () => {
+  const [base, outDir] = process.argv.slice(2);
+  const browser = await chromium.launch();
+  const page = await browser.newPage({ viewport: { width: 1280, height: 820 }, colorScheme: 'dark' });
+  const errs = [], external = [];
+  page.on('pageerror', e => errs.push('pageerror: ' + e.message));
+  page.on('console', m => m.type() === 'error' && errs.push('console: ' + m.text() + ' @ ' + (m.location()?.url || '')));
+  page.on('response', r => r.status() >= 400 && errs.push('http ' + r.status() + ' ' + r.url()));
+  page.on('request', r => { const u = r.url(); if (!/^(https?:\/\/(127\.0\.0\.1|localhost)(:\d+)?\/|data:|blob:)/.test(u)) external.push(u); });
+  let fails = 0;
+  page.setDefaultTimeout(5000);
+  const step = async (name, fn) => { try { const v = await fn(); console.log('ok  ', name, v === undefined ? '' : JSON.stringify(v)); } catch (e) { fails++; console.log('FAIL', name, String(e.message).split('\n')[0]); await page.screenshot({ path: outDir + '/fail_' + fails + '.png' }).catch(() => {}); console.log('     open:', await page.evaluate(() => [...document.querySelectorAll('.open')].map(e => e.id || e.className).join(', ')).catch(() => '?')); } };
+  const has = (sel, cls) => page.waitForFunction(([s, c]) => document.querySelector(s)?.classList.contains(c), [sel, cls], { timeout: 5000 });
+  const hasNot = (sel, cls) => page.waitForFunction(([s, c]) => !document.querySelector(s)?.classList.contains(c), [sel, cls], { timeout: 5000 });
+  const attr = (a) => page.evaluate(x => document.documentElement.getAttribute(x), a);
+  await page.goto(base, { waitUntil: 'load' });
+  await step('boot (picker bar)', () => page.waitForSelector('#amni-bar .ab-prov', { timeout: 10000 }));
+  await step('version from /health', async () => { await page.waitForFunction(() => /v\d/.test(document.querySelector('#sb-ver')?.textContent || ''), null, { timeout: 5000 }); return page.textContent('#sb-ver'); });
+  await step('sidebar tree', () => page.waitForSelector('#sidebar-tree .sb-file', { timeout: 5000 }));
+  await step('tone toggle', async () => { const a = await attr('data-theme'); await page.click('[data-act="look.tone"]'); await page.waitForFunction(x => document.documentElement.getAttribute('data-theme') !== x, a, { timeout: 3000 }); const b = await attr('data-theme'); await page.click('[data-act="look.tone"]'); await page.waitForFunction(x => document.documentElement.getAttribute('data-theme') === x, a, { timeout: 3000 }); return [a, b]; });
+  await step('skin amniscient', async () => { await page.click('[data-act="look.skin"][data-arg="amniscient"]'); await page.waitForFunction(() => document.documentElement.getAttribute('data-skin') === 'amniscient', null, { timeout: 3000 }); await page.screenshot({ path: outDir + '/skin_amniscient.png' }); await page.click('[data-act="look.skin"][data-arg="braid"]'); await page.waitForFunction(() => document.documentElement.getAttribute('data-skin') === 'braid', null, { timeout: 3000 }); });
+  await step('settings open', async () => { await page.click('#settings-btn'); await has('#settings-panel', 'open'); await page.waitForFunction(() => document.querySelector('#cfg-provider')?.value, null, { timeout: 5000 }); await page.waitForTimeout(400); await page.screenshot({ path: outDir + '/settings.png' }); return page.inputValue('#cfg-provider'); });
+  await step('language es', async () => { const before = await page.textContent('[data-i18n="settings"]').catch(() => ''); await page.selectOption('#cfg-lang', 'es'); await page.waitForFunction(b => (document.querySelector('[data-i18n="settings"]')?.textContent || '') !== b, before, { timeout: 3000 }); const after = await page.textContent('[data-i18n="settings"]'); await page.selectOption('#cfg-lang', 'en'); await page.waitForFunction(b => document.querySelector('[data-i18n="settings"]')?.textContent === b, before, { timeout: 3000 }); return [before, after]; });
+  await step('settings close (overlay)', async () => { await page.click('#settings-overlay', { position: { x: 50, y: 400 } }); await hasNot('#settings-panel', 'open'); });
+  await step('history panel', async () => { await page.click('#history-btn'); await has('#history-panel', 'open'); await page.click('#settings-overlay', { position: { x: 900, y: 400 } }); await hasNot('#history-panel', 'open'); });
+  await step('editor + monaco', async () => { await page.click('#editor-toggle'); await has('#editor-col', 'open'); await page.waitForSelector('#editor-col .monaco-editor', { timeout: 15000 }); });
+  await step('open file from sidebar', async () => { await page.click('#sidebar-tree .sb-file'); await page.waitForFunction(() => /Demo\sworkspace/.test(document.querySelector('#editor-col .monaco-editor .view-lines')?.textContent || ''), null, { timeout: 8000 }); await page.screenshot({ path: outDir + '/editor.png' }); return page.$$eval('#editor-col [class*="tab"]', els => els.map(e => e.textContent.trim()).filter(Boolean).slice(0, 4)); });
+  await step('command palette Ctrl+Shift+P', async () => { await page.click('#input'); await page.keyboard.press('Control+Shift+P'); await has('#cmd-palette', 'open'); const n = await page.$$eval('#cmd-list .cmd-item', e => e.length); await page.keyboard.press('Escape'); await hasNot('#cmd-palette', 'open'); return n; });
+  await step('palette filter + Enter runs command', async () => { await page.click('#menu-btn'); await has('#cmd-palette', 'open'); await page.waitForFunction(() => document.activeElement?.id === 'cmd-input'); await page.keyboard.type('split'); const n = await page.$$eval('#cmd-list .cmd-item', e => e.length); await page.keyboard.press('Enter'); await hasNot('#cmd-palette', 'open'); await page.waitForFunction(() => document.querySelectorAll('#pane-container > *').length > 1, null, { timeout: 5000 }); return n; });
+  await step('quick open Ctrl+P', async () => { await page.click('#input'); await page.keyboard.press('Control+p'); await has('#qo-palette', 'open'); const items = await page.$$eval('#qo-list .qo-item', e => e.map(x => x.textContent.trim())); await page.keyboard.press('Escape'); await hasNot('#qo-palette', 'open'); return items.slice(0, 3); });
+  await step('split pane via button', async () => { const a = await page.$$eval('#pane-container > *', e => e.length); await page.click('#split-btn'); await page.waitForFunction(x => document.querySelectorAll('#pane-container > *').length > x, a, { timeout: 5000 }); await page.screenshot({ path: outDir + '/panes.png' }); return [a, await page.$$eval('#pane-container > *', e => e.length)]; });
+  await step('editor close', async () => { await page.click('#editor-toggle'); await hasNot('#editor-col', 'open'); });
+  await step('prompt chip fills input', async () => { await page.click('#new-chat'); const chip = await page.$('[data-act="chat.fill"]'); if (!chip) return 'no chip visible after new chat'; await chip.click(); return (await page.inputValue('#input')).slice(0, 40); });
+  await step('shortcuts sheet', async () => { const b = await page.$('[data-act="picker.shortcuts"], #amni-bar [title*="hortcut"], .ab-keys'); if (!b) return 'no shortcuts button found'; await b.click(); await page.waitForTimeout(300); await page.screenshot({ path: outDir + '/shortcuts.png' }); await page.keyboard.press('Escape'); });
+  await step('no page errors', async () => { const real = errs.filter(e => !/favicon.ico/.test(e)); if (real.length) throw new Error(real.join(' | ')); });
+  await step('no external requests', async () => { if (external.length) throw new Error(external.join(' ')); });
+  await browser.close();
+  console.log(fails ? 'FAILED ' + fails : 'ALL OK');
+  process.exit(fails ? 1 : 0);
+})();

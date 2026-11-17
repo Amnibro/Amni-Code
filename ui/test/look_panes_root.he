@@ -1,0 +1,40 @@
+use web
+use core
+use md
+use look
+use panes
+CLICK i32 := 1
+run_actions():
+	name byte[>..] ~= []
+	arg byte[>..] ~= []
+	while core::take(name, arg):
+		if starts_with(name, "look."):
+			look::act(name[5..], arg)
+		else if starts_with(name, "panes."):
+			panes::act(name[6..], arg)
+		else:
+			web::log("act")
+			web::log(name)
+			web::log(arg);
+export he_event(tag i32, kind i32):
+	if tag == CLICK:
+		t i32 := web::closest(web::ev_target(), "[data-act]")
+		if t != 0:
+			a byte[>..] ~= []
+			g byte[>..] ~= []
+			web::get_attr(t, "data-act", a)
+			web::get_attr(t, "data-arg", g)
+			core::post_el(a, g, t)
+	else if tag >= 10 && tag < 100:
+		core::event(tag, kind)
+	else if tag >= 300 && tag < 400:
+		look::event(tag, kind)
+	else if tag >= 500 && tag < 600:
+		panes::event(tag, kind)
+	run_actions();
+main():
+	core::init()
+	look::init()
+	panes::init()
+	web::listen(web::BODY, "click", CLICK, 0)
+	run_actions();

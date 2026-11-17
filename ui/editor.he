@@ -1,0 +1,957 @@
+use core
+use md
+use web
+use json
+namespace editor
+
+T_TOGGLE i32 := 400
+T_BOOT i32 := 401
+T_NOP i32 := 402
+T_LOADED i32 := 403
+T_CREATED i32 := 404
+T_SAVE_KEY i32 := 405
+T_SUGGEST_KEY i32 := 406
+T_CURSOR i32 := 407
+T_POSITION i32 := 408
+T_URI i32 := 409
+T_FIND_MODEL i32 := 410
+T_MAKE_MODEL i32 := 411
+T_BLANK_MODEL i32 := 412
+T_VIEW_STATE i32 := 413
+T_SAVE_VALUE i32 := 414
+T_SUGGEST_POS i32 := 415
+T_SUGGEST_VALUE i32 := 416
+T_OPEN_FETCH i32 := 417
+T_SAVE_FETCH i32 := 418
+T_QO_FETCH i32 := 419
+T_FS_STREAM i32 := 420
+T_FS_RETRY i32 := 421
+T_CMD_INPUT i32 := 422
+T_CMD_KEY i32 := 423
+T_CMD_HOVER i32 := 424
+T_CMD_OVERLAY i32 := 425
+T_CMD_FOCUS i32 := 426
+T_QO_INPUT i32 := 427
+T_QO_KEY i32 := 428
+T_QO_HOVER i32 := 429
+T_QO_OVERLAY i32 := 430
+T_QO_FOCUS i32 := 431
+T_DOC_KEY i32 := 432
+line_count(list const byte[:]) int:
+	c ~= 0
+	for b list:
+		if b == '\n': c += 1
+	c
+line_at(list const byte[:], n int, out byte[>..]&) bool:
+	k ~= 0
+	start ~= 0
+	for i list.len:
+		if list[i] == '\n':
+			if k == n:
+				out.append(list[start..i])
+				return true
+			k += 1
+			start = i + 1
+	false
+line_index(list const byte[:], entry const byte[:]) int:
+	k ~= 0
+	start ~= 0
+	for i list.len:
+		if list[i] == '\n':
+			if list[start..i] == entry: return k
+			k += 1
+			start = i + 1
+	-1
+line_add(list byte[>..]&, entry const byte[:]):
+	list.append(entry)
+	list.push('\n');
+line_put(list byte[>..]&, n int, entry const byte[:]):
+	tmp byte[>..] ~= []
+	k ~= 0
+	start ~= 0
+	for i list.len:
+		if list[i] == '\n':
+			if k == n:
+				tmp.append(entry)
+			else:
+				tmp.append(list[start..i])
+			tmp.push('\n')
+			k += 1
+			start = i + 1
+	list.clear()
+	list.append(tmp)
+line_drop(list byte[>..]&, n int):
+	tmp byte[>..] ~= []
+	k ~= 0
+	start ~= 0
+	for i list.len:
+		if list[i] == '\n':
+			if k != n:
+				tmp.append(list[start..i])
+				tmp.push('\n')
+			k += 1
+			start = i + 1
+	list.clear()
+	list.append(tmp)
+var tab_paths byte[>..]
+var tab_states byte[>..]
+var tab_models i32[>..<]
+active ~= -1
+editor_h i32 ~= 0
+booting ~= false
+var vs_path byte[>..]
+base_name(path const byte[:], out byte[>..]&):
+	start ~= 0
+	for i path.len:
+		if path[i] == '/' || path[i] == '\\': start = i + 1
+	out.append(path[start..])
+current_file(out byte[>..]&) bool:
+	if active < 0 || active >= line_count(tab_paths): return false
+	line_at(tab_paths, active, out)
+sidebar_base(out byte[>..]&):
+	root i32 := web::el("sidebar-tree")
+	if root == 0: return
+	h i32 := web::query(root, ".sb-path")
+	if h != 0:
+		t byte[>..] ~= []
+		web::get_text(h, t)
+		out.append(t)
+		web::release(h)
+lang_name(e const byte[:]) const byte[:]:
+	if e == "py": return "python"
+	if e == "js": return "javascript"
+	if e == "ts": return "typescript"
+	if e == "jsx": return "javascriptreact"
+	if e == "tsx": return "typescriptreact"
+	if e == "rs": return "rust"
+	if e == "html": return "html"
+	if e == "css": return "css"
+	if e == "json": return "json"
+	if e == "md": return "markdown"
+	if e == "sh": return "bash"
+	if e == "bat": return "bat"
+	if e == "toml": return "ini"
+	if e == "yaml": return "yaml"
+	if e == "yml": return "yaml"
+	if e == "xml": return "xml"
+	if e == "sql": return "sql"
+	if e == "c": return "c"
+	if e == "cpp": return "cpp"
+	if e == "h": return "c"
+	if e == "hpp": return "cpp"
+	if e == "java": return "java"
+	if e == "go": return "go"
+	if e == "rb": return "ruby"
+	if e == "php": return "php"
+	if e == "swift": return "swift"
+	if e == "kt": return "kotlin"
+	if e == "r": return "r"
+	if e == "lua": return "lua"
+	if e == "zig": return "zig"
+	"plaintext"
+language_of(path const byte[:], out byte[>..]&):
+	start ~= 0
+	for i path.len:
+		if path[i] == '.': start = i + 1
+	ext byte[>..] ~= []
+	for c path[start..]:
+		if c >= 'A' && c <= 'Z':
+			ext.push(c + 32)
+		else:
+			ext.push(c)
+	out.append(lang_name(ext))
+render_tabs():
+	bar i32 := web::el("tab-bar")
+	if bar == 0: return
+	h byte[>..] ~= []
+	n := line_count(tab_paths)
+	for i n:
+		p byte[>..] ~= []
+		line_at(tab_paths, i, p)
+		h.append("<div class=\"tab")
+		if i == active: h.append(" active")
+		h.append("\" data-act=\"editor.tab\" data-arg=\"")
+		format(h, i)
+		h.append("\" title=\"")
+		md::esc(h, p)
+		h.append("\"><span>")
+		b byte[>..] ~= []
+		base_name(p, b)
+		md::esc_html(h, b)
+		h.append("</span><span class=\"tab-close\" data-act=\"editor.tab_close\" data-arg=\"")
+		format(h, i)
+		h.append("\">✕</span></div>")
+	web::html(bar, h)
+render_crumbs(path const byte[:]):
+	el i32 := web::el("breadcrumbs")
+	if el == 0: return
+	if path.len == 0:
+		web::html(el, "")
+		return
+	parts byte[>..] ~= []
+	start ~= 0
+	for i path.len + 1:
+		if i == path.len || path[i] == '/' || path[i] == '\\':
+			if i > start: line_add(parts, path[start..i])
+			start = i + 1
+	n := line_count(parts)
+	h byte[>..] ~= []
+	for i n:
+		p byte[>..] ~= []
+		line_at(parts, i, p)
+		if i > 0: h.append("<span class=\"bc-sep\">›</span>")
+		if i == n - 1:
+			h.append("<span style=\"color:var(--accent)\">")
+		else:
+			h.append("<span>")
+		md::esc_html(h, p)
+		h.append("</span>")
+	web::html(el, h)
+set_file_label(path const byte[:]):
+	b byte[>..] ~= []
+	base_name(path, b)
+	web::text(web::el("editor-filename"), b)
+update_status():
+	if editor_h == 0: return
+	web::js_call(editor_h, "getPosition", "[]", T_POSITION)
+	f byte[>..] ~= []
+	if current_file(f):
+		l byte[>..] ~= []
+		language_of(f, l)
+		if l.len > 0 && l[0] >= 'a' && l[0] <= 'z': l[0] -= 32
+		web::text(web::el("sb-lang"), l)
+on_position():
+	h i32 := web::js_handle(web::ev_id())
+	if h != 0:
+		s byte[>..] ~= []
+		s.append("Ln ")
+		format(s, web::get_num(h, "lineNumber") as int)
+		s.append(", Col ")
+		format(s, web::get_num(h, "column") as int)
+		web::text(web::el("sb-pos"), s)
+		web::release(h)
+toggle():
+	col i32 := web::el("editor-col")
+	tg i32 := web::el("editor-toggle")
+	on := !web::has_cls(col, "open")
+	web::cls(col, "open", on)
+	if on:
+		web::cls(tg, "active", true)
+		if editor_h == 0: web::timer(300, T_BOOT)
+	else:
+		web::cls(tg, "active", false)
+ensure_open():
+	if !web::has_cls(web::el("editor-col"), "open"): toggle()
+hobj(out byte[>..]&, h i32):
+	out.append("{\"$h\":")
+	format(out, h)
+	out.append("}")
+cbobj(out byte[>..]&, tag i32):
+	out.append("{\"$cb\":")
+	format(out, tag)
+	out.append("}")
+boot():
+	if editor_h != 0 || booting: return
+	booting = true
+	req i32 := web::js_global("require")
+	web::js_call(req, "config", "[{\"paths\":{\"vs\":\"/vendor/monaco/vs\"}}]", T_NOP)
+	a byte[>..] ~= []
+	a.append("[[\"vs/editor/editor.main\"],")
+	cbobj(a, T_LOADED)
+	a.append("]")
+	web::js_call(req, "", a, T_NOP);
+on_loaded():
+	b byte[>..] ~= []
+	has := web::get_attr(web::BODY, "data-theme", b)
+	light := has && b == "light"
+	theme ~= "vs-dark"
+	if light: theme = "vs"
+	a byte[>..] ~= []
+	a.append("[")
+	hobj(a, web::el("monaco-container"))
+	a.append(",{\"value\":\"\",\"language\":\"plaintext\",\"theme\":")
+	json::format_string(a, theme)
+	a.append(",\"automaticLayout\":true,\"fontSize\":14,\"minimap\":{\"enabled\":false},\"scrollBeyondLastLine\":false}]")
+	web::js_call(web::js_global("monaco.editor"), "create", a, T_CREATED);
+on_created():
+	editor_h = web::js_handle(web::ev_id())
+	if editor_h == 0:
+		booting = false
+		return
+	km i32 := web::js_global("monaco.KeyMod")
+	kc i32 := web::js_global("monaco.KeyCode")
+	ctrl := web::get_num(km, "CtrlCmd") as int
+	ks := web::get_num(kc, "KeyS") as int
+	sp := web::get_num(kc, "Space") as int
+	a byte[>..] ~= []
+	format(a, "[", ctrl | ks, ",")
+	cbobj(a, T_SAVE_KEY)
+	a.append("]")
+	web::js_call(editor_h, "addCommand", a, T_NOP)
+	a.clear()
+	format(a, "[", ctrl | sp, ",")
+	cbobj(a, T_SUGGEST_KEY)
+	a.append("]")
+	web::js_call(editor_h, "addCommand", a, T_NOP)
+	a.clear()
+	a.append("[")
+	cbobj(a, T_CURSOR)
+	a.append("]")
+	web::js_call(editor_h, "onDidChangeCursorPosition", a, T_NOP)
+	if line_count(tab_paths) > 0:
+		if active < 0:
+			show_tab(0)
+		else:
+			show_tab(active)
+	continue_open()
+show_tab(idx int):
+	n := line_count(tab_paths)
+	if idx < 0 || idx >= n: return
+	if editor_h != 0:
+		vs_path.clear()
+		if current_file(vs_path): web::js_call(editor_h, "saveViewState", "[]", T_VIEW_STATE)
+	active = idx
+	p byte[>..] ~= []
+	line_at(tab_paths, idx, p)
+	set_file_label(p)
+	if editor_h != 0:
+		m i32 := tab_models[idx]
+		if m != 0:
+			a byte[>..] ~= []
+			a.append("[")
+			hobj(a, m)
+			a.append("]")
+			web::js_call(editor_h, "setModel", a, T_NOP)
+		st byte[>..] ~= []
+		line_at(tab_states, idx, st)
+		if st != "null":
+			a2 byte[>..] ~= []
+			a2.append("[")
+			a2.append(st)
+			a2.append("]")
+			web::js_call(editor_h, "restoreViewState", a2, T_NOP)
+		web::js_call(editor_h, "focus", "[]", T_NOP)
+		update_status()
+	render_crumbs(p)
+	render_tabs()
+on_view_state():
+	r byte[>..] ~= []
+	if web::js_result(web::ev_id(), r):
+		i := line_index(tab_paths, vs_path)
+		if i >= 0: line_put(tab_states, i, r)
+dispose_model(h i32):
+	web::js_call(h, "dispose", "[]", T_NOP)
+	web::release(h)
+close_tab(idx int):
+	n := line_count(tab_paths)
+	if idx < 0 || idx >= n: return
+	m i32 := tab_models[idx]
+	if m != 0: dispose_model(m)
+	line_drop(tab_paths, idx)
+	line_drop(tab_states, idx)
+	tab_models.remove_at(idx)
+	left := n - 1
+	if left == 0:
+		active = -1
+		web::text(web::el("editor-filename"), "untitled.py")
+		if editor_h != 0: web::js_call(web::js_global("monaco.editor"), "createModel", "[\"\",\"plaintext\"]", T_BLANK_MODEL)
+	else:
+		active = min(idx, left - 1)
+		show_tab(active)
+	render_tabs()
+on_blank_model():
+	h i32 := web::js_handle(web::ev_id())
+	if h != 0:
+		a byte[>..] ~= []
+		a.append("[")
+		hobj(a, h)
+		a.append("]")
+		web::js_call(editor_h, "setModel", a, T_NOP)
+		web::release(h)
+var open_q byte[>..]
+open_busy ~= false
+var open_cur byte[>..]
+var open_text byte[>..]
+open_uri i32 ~= 0
+await_editor ~= false
+queue_open(path const byte[:]):
+	line_add(open_q, path)
+	next_open()
+next_open():
+	if open_busy || line_count(open_q) == 0: return
+	open_cur.clear()
+	line_at(open_q, 0, open_cur)
+	line_drop(open_q, 0)
+	open_busy = true
+	u byte[>..] ~= []
+	u.append("/api/read_file?path=")
+	core::url_part(u, open_cur)
+	web::fetch(u, T_OPEN_FETCH);
+on_open_fetch():
+	body byte[>..] ~= []
+	web::fetch_take(web::ev_id(), body)
+	st := web::ev_status()
+	web::fetch_free(web::ev_id())
+	done ~= false
+	if st != 0:
+		d ~= json::Doc{..}
+		root, err := json::parse(body, d)
+		if root >= 0 && !json::is_null(d, root):
+			content byte[>..] ~= []
+			m := json::member(d, root, "content")
+			if m >= 0:
+				s, ok := json::as_string(d, m)
+				if ok: content.append(s)
+			load(open_cur, content)
+			done = true
+	if !done:
+		msg byte[>..] ~= []
+		msg.append("Could not open: ")
+		msg.append(open_cur)
+		core::post("chat.system", msg)
+		finish_open()
+load(path const byte[:], content const byte[:]):
+	open_text.clear()
+	open_text.append(content)
+	i := line_index(tab_paths, path)
+	if i >= 0:
+		show_tab(i)
+		ensure_open()
+		finish_open()
+		return
+	if editor_h != 0:
+		vs_path.clear()
+		if current_file(vs_path): web::js_call(editor_h, "saveViewState", "[]", T_VIEW_STATE)
+	line_add(tab_paths, path)
+	line_add(tab_states, "null")
+	tab_models.push(0)
+	active = line_count(tab_paths) - 1
+	set_file_label(path)
+	render_crumbs(path)
+	render_tabs()
+	ensure_open()
+	if editor_h != 0:
+		start_model()
+	else:
+		await_editor = true;
+continue_open():
+	if await_editor && editor_h != 0:
+		start_model()
+		await_editor = false
+start_model():
+	p byte[>..] ~= []
+	lead ~= true
+	for c open_cur:
+		ch ~= c
+		if ch == '\\': ch = '/'
+		if lead && ch == '/': continue
+		lead = false
+		p.push(ch)
+	full byte[>..] ~= []
+	full.append("file:///")
+	full.append(p)
+	a byte[>..] ~= []
+	a.append("[")
+	json::format_string(a, full)
+	a.append("]")
+	web::js_call(web::js_global("monaco"), "Uri.parse", a, T_URI);
+on_uri():
+	open_uri = web::js_handle(web::ev_id())
+	if open_uri == 0:
+		finish_open()
+	else:
+		a byte[>..] ~= []
+		a.append("[")
+		hobj(a, open_uri)
+		a.append("]")
+		web::js_call(web::js_global("monaco.editor"), "getModel", a, T_FIND_MODEL)
+on_find_model():
+	h i32 := web::js_handle(web::ev_id())
+	if h != 0:
+		attach(h)
+	else:
+		l byte[>..] ~= []
+		language_of(open_cur, l)
+		a byte[>..] ~= []
+		a.append("[")
+		json::format_string(a, open_text)
+		a.append(",")
+		json::format_string(a, l)
+		a.append(",")
+		hobj(a, open_uri)
+		a.append("]")
+		web::js_call(web::js_global("monaco.editor"), "createModel", a, T_MAKE_MODEL)
+on_make_model():
+	h i32 := web::js_handle(web::ev_id())
+	if h != 0:
+		attach(h)
+	else:
+		finish_open()
+attach(h i32):
+	i := line_index(tab_paths, open_cur)
+	if i < 0:
+		dispose_model(h)
+	else:
+		tab_models[i] = h
+		if i == active && editor_h != 0:
+			a byte[>..] ~= []
+			a.append("[")
+			hobj(a, h)
+			a.append("]")
+			web::js_call(editor_h, "setModel", a, T_NOP)
+			update_status()
+		render_tabs()
+	finish_open()
+finish_open():
+	if open_uri != 0:
+		web::release(open_uri)
+		open_uri = 0
+	open_text.clear()
+	open_busy = false
+	await_editor = false
+	next_open()
+var save_path byte[>..]
+save():
+	f byte[>..] ~= []
+	if editor_h == 0 || !current_file(f):
+		web::js_call(web::WINDOW, "alert", "[\"Open a file first!\"]", T_NOP)
+		return
+	save_path.clear()
+	save_path.append(f)
+	web::js_call(editor_h, "getValue", "[]", T_SAVE_VALUE);
+on_save_value():
+	r byte[>..] ~= []
+	web::js_result(web::ev_id(), r)
+	d ~= json::Doc{..}
+	root, err := json::parse(r, d)
+	content byte[>..] ~= []
+	if root >= 0:
+		s, ok := json::as_string(d, root)
+		if ok: content.append(s)
+	body byte[>..] ~= []
+	body.append("{\"path\":")
+	json::format_string(body, save_path)
+	body.append(",\"content\":")
+	json::format_string(body, content)
+	body.append("}")
+	web::request("/api/write_file", "POST", "{\"Content-Type\":\"application/json\"}", body, T_SAVE_FETCH, 0);
+on_save_fetch():
+	st := web::ev_status()
+	web::fetch_free(web::ev_id())
+	if st == 0:
+		core::post("chat.system", "Save failed - check connection.")
+	else:
+		m byte[>..] ~= []
+		m.append("Saved ")
+		m.append(save_path)
+		m.append(" from editor!")
+		core::post("chat.system", m)
+		t byte[>..] ~= []
+		t.append("Saved ")
+		base_name(save_path, t)
+		core::toast(t)
+var sug_path byte[>..]
+suggest():
+	f byte[>..] ~= []
+	if editor_h == 0 || !current_file(f): return
+	sug_path.clear()
+	sug_path.append(f)
+	web::js_call(editor_h, "getPosition", "[]", T_SUGGEST_POS);
+sug_line ~= 0
+on_suggest_pos():
+	h i32 := web::js_handle(web::ev_id())
+	sug_line = 0
+	if h != 0:
+		sug_line = web::get_num(h, "lineNumber") as int
+		web::release(h)
+	web::js_call(editor_h, "getValue", "[]", T_SUGGEST_VALUE);
+on_suggest_value():
+	r byte[>..] ~= []
+	web::js_result(web::ev_id(), r)
+	d ~= json::Doc{..}
+	root, err := json::parse(r, d)
+	content byte[>..] ~= []
+	if root >= 0:
+		s, ok := json::as_string(d, root)
+		if ok: content.append(s)
+	p byte[>..] ~= []
+	p.append("AI suggestion/completion for ")
+	p.append(sug_path)
+	p.append(" around line ")
+	format(p, sug_line)
+	p.append(":\n```\n")
+	p.append(content)
+	p.append("\n```\n")
+	web::prop(web::el("input"), "value", p)
+	web::call(web::el("send"), "click")
+	toggle()
+
+COMMANDS() const byte[:]: "New Chat||chat.new|\nToggle Editor|Ctrl+E|editor.toggle|\nToggle Diff Panel||chat.diff|\nSave File|Ctrl+S|editor.save|\nQuick Open File|Ctrl+P|editor.quick_open|\nToggle Settings||settings.open|\nToggle Theme||look.theme_toggle|\nCycle Accent Color||look.accent|\nChat History||chat.history|\nAI Suggestion|Ctrl+Space|editor.suggest|\nClose Active Tab||editor.close_tab|\nNext Tab||editor.next_tab|\nPrevious Tab||editor.prev_tab|\nFocus Chat Input||chat.focus|\nUndo Changes||chat.undo|\nAccept Changes||chat.accept|\nOpen Amni-AI (Adam) ↗||look.amni_ai|\nSkin: Braid||look.theme|braid\nSkin: Amniscient||look.theme|amniscient\nTheme: Jarvis||look.theme|jarvis\nTheme: Scient||look.theme|scient\nTheme: Clean Dark||look.theme|clean-dark\nTheme: Clean Light||look.theme|clean-light\nTheme: Nebula||look.theme|nebula\nTheme: Terminal||look.theme|terminal\nTheme: Solar||look.theme|solar\nCycle Amni-scient Theme||look.theme_cycle|\n%split_view||panes.create|"
+field_of(line const byte[:], k int, out byte[>..]&) bool:
+	f ~= 0
+	start ~= 0
+	for i line.len + 1:
+		if i == line.len || line[i] == '|':
+			if f == k:
+				fld := line[start..i]
+				if k == 0 && fld.len > 0 && fld[0] == '%':
+					core::t(out, fld[1..])
+				else:
+					out.append(fld)
+				return true
+			f += 1
+			start = i + 1
+	true
+command_field(n int, k int, out byte[>..]&) bool:
+	text := COMMANDS()
+	ln ~= 0
+	start ~= 0
+	for i text.len + 1:
+		if i == text.len || text[i] == '\n':
+			if ln == n: return field_of(text[start..i], k, out)
+			ln += 1
+			start = i + 1
+	false
+var cmd_hits int[>..]
+cmd_sel ~= 0
+contains_text(hay const byte[:], needle const byte[:]) bool:
+	if needle.len == 0: return true
+	if needle.len > hay.len: return false
+	for i hay.len - needle.len + 1:
+		if hay[i..i + needle.len] == needle: return true
+	false
+lower_into(out byte[>..]&, s const byte[:]):
+	for c s:
+		if c >= 'A' && c <= 'Z':
+			out.push(c + 32)
+		else:
+			out.push(c)
+match_commands(query const byte[:]):
+	cmd_hits.clear()
+	q byte[>..] ~= []
+	lower_into(q, query)
+	i ~= 0
+	while true:
+		l byte[>..] ~= []
+		if !command_field(i, 0, l): break
+		ll byte[>..] ~= []
+		lower_into(ll, l)
+		if contains_text(ll, q): cmd_hits.push(i)
+		i += 1
+render_commands(query const byte[:]):
+	match_commands(query)
+	cmd_sel = min(cmd_sel, max(cmd_hits.len - 1, 0))
+	h byte[>..] ~= []
+	for p cmd_hits.len:
+		n := cmd_hits[p]
+		h.append("<div class=\"cmd-item")
+		if p == cmd_sel: h.append(" selected")
+		h.append("\" data-idx=\"")
+		format(h, p)
+		h.append("\" data-act=\"editor.cmd\" data-arg=\"")
+		format(h, n)
+		h.append("\"><span>")
+		l byte[>..] ~= []
+		command_field(n, 0, l)
+		md::esc_html(h, l)
+		h.append("</span>")
+		kh byte[>..] ~= []
+		command_field(n, 1, kh)
+		if kh.len > 0:
+			h.append("<span class=\"cmd-key\">")
+			h.append(kh)
+			h.append("</span>")
+		h.append("</div>")
+	web::html(web::el("cmd-list"), h)
+open_palette():
+	web::cls(web::el("cmd-overlay"), "open", true)
+	web::cls(web::el("cmd-palette"), "open", true)
+	web::prop(web::el("cmd-input"), "value", "")
+	cmd_sel = 0
+	render_commands("")
+	web::timer(50, T_CMD_FOCUS);
+close_palette():
+	web::cls(web::el("cmd-overlay"), "open", false)
+	web::cls(web::el("cmd-palette"), "open", false)
+run_command(n int):
+	close_palette()
+	a byte[>..] ~= []
+	if command_field(n, 2, a):
+		g byte[>..] ~= []
+		command_field(n, 3, g)
+		core::post(a, g)
+hovered_index(selector const byte[:]) int:
+	t i32 := web::ev_target()
+	h i32 := web::closest(t, selector)
+	r ~= -1
+	if h != 0:
+		a byte[>..] ~= []
+		if web::get_attr(h, "data-idx", a):
+			n, ok := parse_int(a)
+			if ok: r = n
+		web::release(h)
+		if t != h: web::release(t)
+	r
+on_cmd_key():
+	key byte[>..] ~= []
+	web::ev_key(key)
+	v byte[>..] ~= []
+	web::ev_value(v)
+	match_commands(v)
+	if key == "ArrowDown":
+		web::ev_prevent()
+		cmd_sel = min(cmd_sel + 1, cmd_hits.len - 1)
+		render_commands(v)
+	else if key == "ArrowUp":
+		web::ev_prevent()
+		cmd_sel = max(cmd_sel - 1, 0)
+		render_commands(v)
+	else if key == "Enter":
+		if cmd_hits.len > 0:
+			web::ev_prevent()
+			run_command(cmd_hits[cmd_sel])
+	else if key == "Escape":
+		close_palette()
+var qo_names byte[>..]
+var qo_ends int[>..]
+var qo_prefix byte[>..]
+var qo_hits int[>..]
+qo_sel ~= 0
+open_quick_open():
+	b byte[>..] ~= []
+	sidebar_base(b)
+	u byte[>..] ~= []
+	u.append("/api/ls?path=")
+	core::url_part(u, b)
+	web::fetch(u, T_QO_FETCH);
+on_qo_fetch():
+	body byte[>..] ~= []
+	web::fetch_take(web::ev_id(), body)
+	st := web::ev_status()
+	web::fetch_free(web::ev_id())
+	qo_names.clear()
+	qo_ends.clear()
+	base byte[>..] ~= []
+	sidebar_base(base)
+	n ~= base.len
+	while n > 0 && (base[n - 1] == '/' || base[n - 1] == '\\'): n -= 1
+	slash ~= false
+	for c base[..n]:
+		if c == '/': slash = true
+	qo_prefix.clear()
+	qo_prefix.append(base[..n])
+	if slash:
+		qo_prefix.push('/')
+	else:
+		qo_prefix.push('\\')
+	if st != 0:
+		d ~= json::Doc{..}
+		root, err := json::parse(body, d)
+		if root >= 0:
+			f := json::member(d, root, "files")
+			if f >= 0 && json::kind(d, f) == json::K_ARR:
+				for k json::count(d, f):
+					c := json::element(d, f, k)
+					s, ok := json::as_string(d, c)
+					if ok:
+						qo_names.append(s)
+						qo_ends.push(qo_names.len)
+	web::cls(web::el("qo-overlay"), "open", true)
+	web::cls(web::el("qo-palette"), "open", true)
+	web::prop(web::el("qo-input"), "value", "")
+	qo_sel = 0
+	render_files("")
+	web::timer(50, T_QO_FOCUS);
+qo_name(i int, out byte[>..]&):
+	start ~= 0
+	if i > 0: start = qo_ends[i - 1]
+	out.append(qo_names[start..qo_ends[i]])
+match_files(query const byte[:]):
+	qo_hits.clear()
+	q byte[>..] ~= []
+	lower_into(q, query)
+	for i qo_ends.len:
+		nm byte[>..] ~= []
+		qo_name(i, nm)
+		lo byte[>..] ~= []
+		lower_into(lo, nm)
+		if contains_text(lo, q): qo_hits.push(i)
+render_files(query const byte[:]):
+	match_files(query)
+	qo_sel = min(qo_sel, max(qo_hits.len - 1, 0))
+	h byte[>..] ~= []
+	for p min(qo_hits.len, 30):
+		nm byte[>..] ~= []
+		qo_name(qo_hits[p], nm)
+		path byte[>..] ~= []
+		path.append(qo_prefix)
+		path.append(nm)
+		h.append("<div class=\"qo-item")
+		if p == qo_sel: h.append(" selected")
+		h.append("\" data-idx=\"")
+		format(h, p)
+		h.append("\" data-act=\"editor.qo_open\" data-arg=\"")
+		md::esc(h, path)
+		h.append("\"><span>")
+		md::esc_html(h, nm)
+		h.append("</span><span class=\"qo-path\">")
+		md::esc_html(h, path)
+		h.append("</span></div>")
+	web::html(web::el("qo-list"), h)
+close_quick_open():
+	web::cls(web::el("qo-overlay"), "open", false)
+	web::cls(web::el("qo-palette"), "open", false)
+on_qo_key():
+	key byte[>..] ~= []
+	web::ev_key(key)
+	v byte[>..] ~= []
+	web::ev_value(v)
+	match_files(v)
+	if key == "ArrowDown":
+		web::ev_prevent()
+		qo_sel = min(min(qo_sel + 1, qo_hits.len - 1), 29)
+		render_files(v)
+	else if key == "ArrowUp":
+		web::ev_prevent()
+		qo_sel = max(qo_sel - 1, 0)
+		render_files(v)
+	else if key == "Enter":
+		if qo_hits.len > 0:
+			web::ev_prevent()
+			close_quick_open()
+			p byte[>..] ~= []
+			p.append(qo_prefix)
+			qo_name(qo_hits[qo_sel], p)
+			queue_open(p)
+	else if key == "Escape":
+		close_quick_open()
+MOD_SHIFT i32 := 1
+MOD_CTRL i32 := 2
+MOD_META i32 := 8
+on_doc_key():
+	key byte[>..] ~= []
+	web::ev_key(key)
+	mods := web::ev_mods()
+	mod := (mods & (MOD_CTRL | MOD_META)) != 0
+	shift := (mods & MOD_SHIFT) != 0
+	if mod && shift && key == "P":
+		web::ev_prevent()
+		open_palette()
+	else if mod && !shift && key == "p":
+		web::ev_prevent()
+		open_quick_open()
+	if key == "Escape":
+		if web::has_cls(web::el("cmd-palette"), "open"): close_palette()
+		if web::has_cls(web::el("qo-palette"), "open"): close_quick_open()
+var fs_buf byte[>..]
+start_fs():
+	fs_buf.clear()
+	web::stream("/api/fs-events", "GET", "{\"Accept\":\"text/event-stream\"}", "", T_FS_STREAM);
+on_fs(kind i32):
+	if kind == web::EV_CHUNK:
+		chunk byte[>..] ~= []
+		web::fetch_take(web::ev_id(), chunk)
+		web::fetch_free(web::ev_id())
+		fs_buf.append(chunk)
+		while true:
+			ev byte[>..] ~= []
+			data byte[>..] ~= []
+			if !core::sse_take(fs_buf, ev, data): break
+			if ev == "fs": core::post("settings.sidebar_refresh", "")
+	else if kind == web::EV_FETCH:
+		web::fetch_free(web::ev_id())
+		web::timer(3000, T_FS_RETRY);
+init():
+	web::listen(web::el("editor-toggle"), "click", T_TOGGLE, 0)
+	web::listen(web::el("cmd-input"), "input", T_CMD_INPUT, 0)
+	web::listen(web::el("cmd-input"), "keydown", T_CMD_KEY, 0)
+	web::listen(web::el("cmd-list"), "mouseover", T_CMD_HOVER, 0)
+	web::listen(web::el("cmd-overlay"), "click", T_CMD_OVERLAY, 0)
+	web::listen(web::el("qo-input"), "input", T_QO_INPUT, 0)
+	web::listen(web::el("qo-input"), "keydown", T_QO_KEY, 0)
+	web::listen(web::el("qo-list"), "mouseover", T_QO_HOVER, 0)
+	web::listen(web::el("qo-overlay"), "click", T_QO_OVERLAY, 0)
+	web::listen(web::DOCUMENT, "keydown", T_DOC_KEY, 0)
+	start_fs()
+on_cmd_input():
+	cmd_sel = 0
+	v byte[>..] ~= []
+	web::ev_value(v)
+	render_commands(v)
+on_qo_input():
+	qo_sel = 0
+	v byte[>..] ~= []
+	web::ev_value(v)
+	render_files(v)
+on_cmd_hover():
+	i := hovered_index(".cmd-item")
+	if i != -1 && i != cmd_sel:
+		cmd_sel = i
+		v byte[>..] ~= []
+		web::get_prop(web::el("cmd-input"), "value", v)
+		render_commands(v)
+on_qo_hover():
+	i := hovered_index(".qo-item")
+	if i != -1 && i != qo_sel:
+		qo_sel = i
+		v byte[>..] ~= []
+		web::get_prop(web::el("qo-input"), "value", v)
+		render_files(v)
+event(tag i32, kind i32):
+	if tag == T_TOGGLE: toggle()
+	if tag == T_BOOT: boot()
+	if tag == T_LOADED: on_loaded()
+	if tag == T_CREATED: on_created()
+	if tag == T_SAVE_KEY: save()
+	if tag == T_SUGGEST_KEY: suggest()
+	if tag == T_CURSOR: update_status()
+	if tag == T_POSITION: on_position()
+	if tag == T_URI: on_uri()
+	if tag == T_FIND_MODEL: on_find_model()
+	if tag == T_MAKE_MODEL: on_make_model()
+	if tag == T_BLANK_MODEL: on_blank_model()
+	if tag == T_VIEW_STATE: on_view_state()
+	if tag == T_SAVE_VALUE: on_save_value()
+	if tag == T_SUGGEST_POS: on_suggest_pos()
+	if tag == T_SUGGEST_VALUE: on_suggest_value()
+	if tag == T_OPEN_FETCH && kind == web::EV_FETCH: on_open_fetch()
+	if tag == T_SAVE_FETCH && kind == web::EV_FETCH: on_save_fetch()
+	if tag == T_QO_FETCH && kind == web::EV_FETCH: on_qo_fetch()
+	if tag == T_FS_STREAM: on_fs(kind)
+	if tag == T_FS_RETRY: start_fs()
+	if tag == T_CMD_INPUT: on_cmd_input()
+	if tag == T_CMD_KEY: on_cmd_key()
+	if tag == T_CMD_HOVER: on_cmd_hover()
+	if tag == T_CMD_OVERLAY: close_palette()
+	if tag == T_CMD_FOCUS: web::call(web::el("cmd-input"), "focus")
+	if tag == T_QO_INPUT: on_qo_input()
+	if tag == T_QO_KEY: on_qo_key()
+	if tag == T_QO_HOVER: on_qo_hover()
+	if tag == T_QO_OVERLAY: close_quick_open()
+	if tag == T_QO_FOCUS: web::call(web::el("qo-input"), "focus")
+	if tag == T_DOC_KEY: on_doc_key()
+num_of(s const byte[:]) int:
+	n, ok := parse_int(s)
+	if ok: return n
+	0
+act(verb const byte[:], arg const byte[:]):
+	if verb == "toggle": toggle()
+	if verb == "save": save()
+	if verb == "suggest": suggest()
+	if verb == "palette": open_palette()
+	if verb == "quick_open": open_quick_open()
+	if verb == "open": queue_open(arg)
+	if verb == "tab": show_tab(num_of(arg))
+	if verb == "tab_close": close_tab(num_of(arg))
+	if verb == "close_tab":
+		if active >= 0: close_tab(active)
+	if verb == "next_tab":
+		n := line_count(tab_paths)
+		if n > 1: show_tab((active + 1) % n)
+	if verb == "prev_tab":
+		n := line_count(tab_paths)
+		if n > 1: show_tab((active - 1 + n) % n)
+	if verb == "cmd": run_command(num_of(arg))
+	if verb == "qo_open":
+		close_quick_open()
+		queue_open(arg)

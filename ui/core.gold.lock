@@ -1,0 +1,220 @@
+=== -5a097d17abeaf162
+use json
+use web
+namespace core
+=== -5b66d5673b2a087a
+TOAST_FADE i32 := 10
+TOAST_GONE i32 := 11
+=== 08c98fbee20b3ffe
+var i18n json::Doc
+var i18n_root int = -1
+var tables json::Doc
+var tables_root int = -1
+=== -3f74f50292a1e2ff
+var lang byte[>..]
+lang_code() const byte[:]:
+	if lang.len == 0:
+		"en"
+	else:
+		lang[..]
+=== 30ecd4c604c1a6bf
+find_tr(code const byte[:], key const byte[:]) int:
+	guard i18n_root >= 0 else { return -1 }
+	o := json::member(i18n, i18n_root, code)
+	guard o >= 0 else { return -1 }
+	json::member(i18n, o, key)
+t(out byte[>..]&, key const byte[:]):
+	n ~= find_tr(lang_code(), key)
+	if n < 0: n = find_tr("en", key)
+	if n >= 0:
+		s, ok := json::as_string(i18n, n)
+		if ok: out.append(s); return
+	out.append(key);
+=== -2523338cbc099e52
+apply_i18n():
+	buf byte[>..] ~= []
+	val byte[>..] ~= []
+	n := web::query_all(web::DOCUMENT, "[data-i18n]")
+	for i n:
+		h i32 := web::list_at(i as i32)
+		val.clear()
+		if web::get_attr(h, "data-i18n", val):
+			buf.clear()
+			t(buf, val)
+			web::text(h, buf)
+	n2 := web::query_all(web::DOCUMENT, "[data-i18n-placeholder]")
+	for i n2:
+		h i32 := web::list_at(i as i32)
+		val.clear()
+		if web::get_attr(h, "data-i18n-placeholder", val):
+			buf.clear()
+			t(buf, val)
+			web::prop(h, "placeholder", buf)
+	n3 := web::query_all(web::DOCUMENT, "[data-i18n-title]")
+	for i n3:
+		h i32 := web::list_at(i as i32)
+		val.clear()
+		if web::get_attr(h, "data-i18n-title", val):
+			buf.clear()
+			t(buf, val)
+			web::prop(h, "title", buf);
+=== -64de8f608bf987bc
+apply_dir():
+	if lang_code() == "ar":
+		web::attr(web::ROOT, "dir", "rtl")
+	else:
+		web::attr(web::ROOT, "dir", "ltr");
+set_lang(code const byte[:]):
+	tmp byte[>..] ~= []
+	tmp.append(code)
+	lang.clear()
+	lang.append(tmp)
+	web::store_set("amniLang", tmp)
+	apply_dir()
+	apply_i18n();
+=== -23b970d2dd7e0349
+provider(id const byte[:]) int:
+	guard tables_root >= 0 else { return -1 }
+	o := json::member(tables, tables_root, "core_providers")
+	guard o >= 0 else { return -1 }
+	json::member(tables, o, id)
+theme(name const byte[:]) int:
+	guard tables_root >= 0 else { return -1 }
+	o := json::member(tables, tables_root, "amni_themes")
+	guard o >= 0 else { return -1 }
+	json::member(tables, o, name)
+=== 38352bee1eda67af
+model_label(out byte[>..]&, model const byte[:]):
+	if tables_root >= 0:
+		o := json::member(tables, tables_root, "model_labels")
+		if o >= 0:
+			n := json::member(tables, o, model)
+			if n >= 0:
+				s, ok := json::as_string(tables, n)
+				if ok: out.append(s); return
+	if starts_with(model, "hf.co/"):
+		out.append(model[6..])
+	else:
+		out.append(model);
+=== -e0646a77d7f0f6e
+var fade_q i32[>..]
+var fade_head int = 0
+var gone_q i32[>..]
+var gone_head int = 0
+toast(msg const byte[:]):
+	h i32 := web::create("div")
+	web::cls(h, "toast", true)
+	web::text(h, msg)
+	web::append(web::el("toast-container"), h)
+	fade_q.push(h)
+	web::timer(3000.0, TOAST_FADE);
+=== -7de0a5e8e8865a32
+event(tag i32, kind i32) bool:
+	if tag == TOAST_FADE:
+		if fade_head < fade_q.len:
+			h i32 := fade_q[fade_head]
+			fade_head += 1
+			if fade_head == fade_q.len: fade_q.clear(); fade_head = 0
+			web::cls(h, "fade-out", true)
+			gone_q.push(h)
+			web::timer(250.0, TOAST_GONE)
+		return true
+	if tag == TOAST_GONE:
+		if gone_head < gone_q.len:
+			h i32 := gone_q[gone_head]
+			gone_head += 1
+			if gone_head == gone_q.len: gone_q.clear(); gone_head = 0
+			web::remove(h)
+			web::release(h)
+		return true
+	return false
+=== -2b992bbf2fc5d93c
+var q_names byte[>..]
+var q_name_ends int[>..]
+var q_args byte[>..]
+var q_arg_ends int[>..]
+var q_els i32[>..]
+var q_head int = 0
+var act_el i32 = 0
+post_el(name const byte[:], arg const byte[:], el i32):
+	q_names.append(name)
+	q_name_ends.push(q_names.len)
+	q_args.append(arg)
+	q_arg_ends.push(q_args.len)
+	q_els.push(el);
+post(name const byte[:], arg const byte[:]):
+	post_el(name, arg, 0);
+take(name byte[>..]&, arg byte[>..]&) bool:
+	name.clear()
+	arg.clear()
+	if q_head >= q_els.len: return false
+	ns := if q_head == 0 { 0 } else { q_name_ends[q_head - 1] }
+	as_ := if q_head == 0 { 0 } else { q_arg_ends[q_head - 1] }
+	name.append(q_names[ns..q_name_ends[q_head]])
+	arg.append(q_args[as_..q_arg_ends[q_head]])
+	act_el = q_els[q_head]
+	q_head += 1
+	if q_head == q_els.len:
+		q_names.clear()
+		q_name_ends.clear()
+		q_args.clear()
+		q_arg_ends.clear()
+		q_els.clear()
+		q_head = 0
+	true
+=== 7e247c040a4f6618
+init():
+	i18n_text := embed_file("data/i18n.json")
+	r1, why1 := json::parse(i18n_text, i18n)
+	i18n_root = r1
+	tables_text := embed_file("data/tables.json")
+	r2, why2 := json::parse(tables_text, tables)
+	tables_root = r2
+	saved byte[>..] ~= []
+	if web::store_get("amniLang", saved) && saved.len > 0: lang.clear(); lang.append(saved)
+	apply_dir()
+	apply_i18n();
+=== 15d79ae6e5370095
+sse_take(buf byte[>..]&, event byte[>..]&, data byte[>..]&) bool:
+	event.clear()
+	data.clear()
+	stop ~= -1
+	i ~= 0
+	while i + 1 < buf.len:
+		if buf[i] == '\n' && buf[i + 1] == '\n':
+			stop = i
+			break
+		i += 1
+	if stop < 0: return false
+	has_data ~= false
+	ls ~= 0
+	j ~= 0
+	while j <= stop:
+		if j == stop || buf[j] == '\n':
+			line := buf[ls..j]
+			if starts_with(line, "event:"):
+				event.clear()
+				event.append(trim(line[6..]))
+			else if starts_with(line, "data:"):
+				skip := if line.len > 5 && line[5] == ' ' { 6 } else { 5 }
+				if has_data: data.push('\n')
+				data.append(line[skip..])
+				has_data = true
+			ls = j + 1
+		j += 1
+	remain byte[>..] ~= []
+	remain.append(buf[stop + 2..])
+	buf.clear()
+	buf.append(remain)
+	true
+=== 6b8a5a15ad3b6c1c
+url_part(out byte[>..]&, text const byte[:]):
+	hex := "0123456789ABCDEF"
+	for c text:
+		keep := (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-' || c == '_' || c == '.' || c == '!' || c == '~' || c == '*' || c == '\'' || c == '(' || c == ')'
+		if keep:
+			out.push(c)
+		else:
+			out.push('%')
+			out.push(hex[(c >> 4) as int])
+			out.push(hex[(c & 15) as int]);

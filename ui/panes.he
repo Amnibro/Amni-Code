@@ -1,0 +1,466 @@
+use web
+use core
+use md
+use json
+namespace panes
+let T_SPLIT i32 = 501
+let T_STREAM i32 = 502
+let T_MODELS i32 = 503
+let T_KEY i32 = 504
+let T_INPUT i32 = 505
+let T_DOWN i32 = 507
+let T_MOVE i32 = 508
+let T_UP i32 = 509
+var pane_ids int[>..]
+var pane_els i32[>..]
+var pane_msgs i32[>..]
+var container i32 = 0
+var rq_ids int[>..]
+var rq_think i32[>..]
+var rq_msgs i32[>..]
+var rq_pane i32[>..]
+var mq_ids int[>..]
+var mq_sels i32[>..]
+var dragging bool = false
+var drag_ready bool = false
+var drag_div i32 = 0
+var drag_left i32 = 0
+var drag_right i32 = 0
+var drag_x real = 0.0
+var drag_lw real = 0.0
+var drag_rw real = 0.0
+pane_index(id int) int:
+	for i pane_ids.len:
+		if pane_ids[i] == id: return i
+	return -1
+auto_resize(h i32):
+	web::style(h, "height", "auto")
+	v := min(web::get_num(h, "scrollHeight"), 150.0) as int
+	s byte[>..] ~= []
+	format(s, v, "px")
+	web::style(h, "height", s);
+scroll_down(h i32):
+	web::prop_num(h, "scrollTop", web::get_num(h, "scrollHeight"));
+tr(key const byte[:]) byte[>..]:
+	o byte[>..] ~= []
+	core::t(o, key)
+	o
+add_msg(msgs i32, kind const byte[:], text const byte[:]):
+	d i32 := web::create("div")
+	c byte[>..] ~= []
+	c.append("msg ")
+	c.append(kind)
+	web::attr(d, "class", c)
+	web::text(d, text)
+	web::append(msgs, d)
+	web::release(d);
+pane_html(out byte[>..]&, id int):
+	out.append("<div class=\"pane-header\"><span>")
+	out.append(tr("pane"))
+	out.append(" ")
+	format(out, id + 1)
+	out.append("</span><select class=\"pane-model\" data-change=\"panes.model\"></select><button class=\"pane-close\" data-act=\"panes.close\" data-arg=\"")
+	format(out, id)
+	out.append("\" title=\"")
+	out.append(tr("close_pane"))
+	out.append("\">✕</button></div><div class=\"chat-col\" style=\"border:none\"><div class=\"messages\" id=\"pane-msgs-")
+	format(out, id)
+	out.append("\"><div class=\"welcome\"><h2>")
+	out.append(tr("welcome_title"))
+	out.append("</h2><p>")
+	out.append(tr("welcome_desc"))
+	out.append("</p></div></div><div class=\"input-area\"><div class=\"input-wrap\"><textarea rows=\"1\" placeholder=\"")
+	out.append(tr("placeholder_chat"))
+	out.append("\"></textarea><button class=\"send-btn\" data-act=\"panes.send\" data-arg=\"")
+	format(out, id)
+	out.append("\"><svg viewBox=\"0 0 24 24\" fill=\"currentColor\"><path d=\"M2.01 21L23 12 2.01 3 2 10l15 2-15 2z\"/></svg></button></div></div></div>");
+populate_models(id int):
+	k := pane_index(id)
+	if k < 0: return
+	sel := web::query(pane_els[k], ".pane-model")
+	if sel <= 0: return
+	fid := web::fetch("/api/models", T_MODELS)
+	mq_ids.push(fid)
+	mq_sels.push(sel);
+models_done():
+	fid i32 := web::ev_id()
+	status i32 := web::ev_status()
+	body byte[>..] ~= []
+	web::fetch_take(fid, body)
+	web::fetch_free(fid)
+	k ~= -1
+	for i mq_ids.len:
+		if k < 0 && mq_ids[i] == fid as int: k = i
+	if k < 0: return
+	sel i32 := mq_sels[k]
+	last := mq_ids.len - 1
+	for i k..last:
+		mq_ids[i] = mq_ids[i + 1]
+		mq_sels[i] = mq_sels[i + 1]
+	mq_ids.pop()
+	mq_sels.pop()
+	html byte[>..] ~= []
+	ok ~= false
+	if status != 0:
+		d json::Doc ~= json::Doc{..}
+		root, err := json::parse(body, d)
+		if root >= 0:
+			m := json::member(d, root, "models")
+			if m >= 0 && json::kind(d, m) == json::K_ARR:
+				n := json::count(d, m)
+				for i n:
+					e := json::element(d, m, i)
+					t, sok := json::as_string(d, e)
+					esc byte[>..] ~= []
+					if sok: md::esc_html(esc, t)
+					html.append("<option value=\"")
+					html.append(esc)
+					html.append("\">")
+					html.append(esc)
+					html.append("</option>")
+				ok = true
+	if ok:
+		web::html(sel, html)
+	else:
+		web::html(sel, "<option>Error</option>");
+create_pane():
+	if pane_ids.len >= 3:
+		m byte[>..] ~= []
+		m.append(tr("split_view"))
+		m.append(": max 3")
+		core::toast(m)
+		return
+	id := pane_ids.len
+	dv i32 := web::create("div")
+	web::cls(dv, "pane-divider", true)
+	s byte[>..] ~= []
+	format(s, id - 1)
+	web::attr(dv, "data-left-pane", s)
+	s.clear()
+	format(s, id)
+	web::attr(dv, "data-right-pane", s)
+	web::listen(dv, "mousedown", T_DOWN, web::PREVENT)
+	web::append(container, dv)
+	web::release(dv)
+	p i32 := web::create("div")
+	web::cls(p, "pane", true)
+	s.clear()
+	format(s, "pane-", id)
+	web::attr(p, "id", s)
+	s.clear()
+	format(s, id)
+	web::attr(p, "data-pane-id", s)
+	h byte[>..] ~= []
+	pane_html(h, id)
+	web::html(p, h)
+	web::append(container, p)
+	ta i32 := web::query(p, "textarea")
+	web::listen(ta, "keydown", T_KEY, 0)
+	web::listen(ta, "input", T_INPUT, 0)
+	msgs i32 := web::query(p, ".messages")
+	pane_ids.push(id)
+	pane_els.push(p)
+	pane_msgs.push(msgs)
+	populate_models(id)
+	t byte[>..] ~= []
+	t.append(tr("split_view"))
+	t.append(" → ")
+	format(t, id + 1)
+	core::toast(t);
+close_pane(id int):
+	if pane_ids.len <= 1: return
+	pi := pane_index(id)
+	if pi < 0: return
+	el i32 := pane_els[pi]
+	n int := web::child_count(container)
+	k ~= -1
+	for i n:
+		c i32 := web::child(container, i as i32)
+		if web::same(c, el):
+			k = i
+		else:
+			if web::has_cls(c, "pane-divider"): web::release(c)
+	done ~= false
+	if k > 0:
+		c i32 := web::child(container, (k - 1) as i32)
+		if web::has_cls(c, "pane-divider"):
+			web::remove(c)
+			web::release(c)
+			done = true
+	if !done && k >= 0 && k + 1 < n:
+		c i32 := web::child(container, (k + 1) as i32)
+		if web::has_cls(c, "pane-divider"):
+			web::remove(c)
+			web::release(c)
+	web::remove(el)
+	last := pane_ids.len - 1
+	for i pi..last:
+		pane_ids[i] = pane_ids[i + 1]
+		pane_els[i] = pane_els[i + 1]
+		pane_msgs[i] = pane_msgs[i + 1]
+	pane_ids.pop()
+	pane_els.pop()
+	pane_msgs.pop()
+	core::toast(tr("close_pane"));
+send_pane(id int, ta i32):
+	v byte[>..] ~= []
+	web::get_prop(ta, "value", v)
+	text := md::trim_js(v)
+	if text.len == 0: return
+	web::prop(ta, "value", "")
+	auto_resize(ta)
+	k := pane_index(id)
+	if k < 0: return
+	msgs i32 := pane_msgs[k]
+	pel i32 := pane_els[k]
+	w i32 := web::query(msgs, ".welcome")
+	if w > 0: web::remove(w)
+	add_msg(msgs, "user", text)
+	scroll_down(msgs)
+	th i32 := web::create("div")
+	web::attr(th, "class", "msg assistant")
+	web::html(th, "<div class=\"thinking\"><span></span><span></span><span></span></div>")
+	web::append(msgs, th)
+	scroll_down(msgs)
+	tb byte[>..] ~= []
+	tb.append(text)
+	sess byte[>..] ~= []
+	dir byte[>..] ~= []
+	web::get_prop(web::el("cfg-dir"), "value", dir)
+	body byte[>..] ~= []
+	body.append("{")
+	json::format_key(body, "message")
+	json::format_string(body, tb)
+	body.append(",")
+	json::format_key(body, "session_id")
+	if web::get_attr(pel, "data-session", sess):
+		json::format_string(body, sess)
+	else:
+		json::format_null(body)
+	body.append(",")
+	json::format_key(body, "working_dir")
+	json::format_string(body, dir)
+	body.append("}")
+	rid := web::stream("/api/chat", "POST", "{\"Content-Type\":\"application/json\"}", body, T_STREAM)
+	rq_ids.push(rid as int)
+	rq_think.push(th)
+	rq_msgs.push(msgs)
+	rq_pane.push(pel);
+finish_request(slot int):
+	web::remove(rq_think[slot])
+	web::release(rq_think[slot])
+	rq_ids[slot] = -1
+	alldone ~= true
+	for x rq_ids: if x != -1: alldone = false
+	if alldone:
+		rq_ids.clear()
+		rq_think.clear()
+		rq_msgs.clear()
+		rq_pane.clear();
+member_str(d json::Doc&, root int, key const byte[:], out byte[>..]&) bool:
+	out.clear()
+	n := json::member(d, root, key)
+	if n < 0: return false
+	s, ok := json::as_string(d, n)
+	if !ok: return false
+	out.append(s)
+	true
+handle_sse(slot int, kind const byte[:], data const byte[:]) bool:
+	d json::Doc ~= json::Doc{..}
+	root, err := json::parse(data, d)
+	if root < 0: return true
+	th i32 := rq_think[slot]
+	pel i32 := rq_pane[slot]
+	msgs i32 := rq_msgs[slot]
+	if kind == "session":
+		sid byte[>..] ~= []
+		if member_str(d, root, "session_id", sid):
+			web::attr(pel, "data-session", sid)
+		else:
+			web::del_attr(pel, "data-session")
+		return true
+	if kind == "tool_result":
+		name byte[>..] ~= []
+		member_str(d, root, "tool", name)
+		st byte[>..] ~= []
+		member_str(d, root, "status", st)
+		tb byte[>..] ~= []
+		web::get_attr(th, "data-tools", tb)
+		tb.append("<span class=\"tool-badge ")
+		if st == "success":
+			tb.append("success")
+		else:
+			tb.append("error")
+		tb.append("\">⚡ ")
+		md::esc_html(tb, name)
+		tb.append("</span>")
+		web::attr(th, "data-tools", tb)
+		if name == "write_file" || name == "edit_file": core::post("chat.parse_diff", data)
+		return true
+	if kind == "message":
+		m byte[>..] ~= []
+		member_str(d, root, "message", m)
+		web::attr(th, "data-final", m)
+		web::attr(th, "data-got", "1")
+		return true
+	if kind == "error":
+		m byte[>..] ~= []
+		member_str(d, root, "error", m)
+		out byte[>..] ~= []
+		out.append(tr("error_prefix"))
+		out.append(": ")
+		if m.len > 0:
+			out.append(m)
+		else:
+			out.append("Unknown")
+		finish_request(slot)
+		add_msg(msgs, "system", out)
+		return false
+	if kind == "interrupted":
+		finish_request(slot)
+		add_msg(msgs, "system", tr("generation_interrupted"))
+		return false
+	true
+on_chunk():
+	cid i32 := web::ev_id()
+	rid i32 := web::ev_status()
+	chunk byte[>..] ~= []
+	web::fetch_take(cid, chunk)
+	web::fetch_free(cid)
+	slot ~= -1
+	for i rq_ids.len:
+		if slot < 0 && rq_ids[i] == rid as int: slot = i
+	if slot < 0: return
+	th i32 := rq_think[slot]
+	buf byte[>..] ~= []
+	web::get_attr(th, "data-buf", buf)
+	buf.append(chunk)
+	ev byte[>..] ~= []
+	dt byte[>..] ~= []
+	while core::sse_take(buf, ev, dt):
+		if dt.len == 0: continue
+		if !handle_sse(slot, ev, dt): return
+	web::attr(th, "data-buf", buf);
+on_end():
+	rid i32 := web::ev_id()
+	status i32 := web::ev_status()
+	body byte[>..] ~= []
+	web::fetch_take(rid, body)
+	web::fetch_free(rid)
+	slot ~= -1
+	for i rq_ids.len:
+		if slot < 0 && rq_ids[i] == rid as int: slot = i
+	if slot < 0: return
+	th i32 := rq_think[slot]
+	msgs i32 := rq_msgs[slot]
+	if status == 0:
+		finish_request(slot)
+		add_msg(msgs, "system", tr("connection_error"))
+		return
+	tools byte[>..] ~= []
+	fin byte[>..] ~= []
+	got byte[>..] ~= []
+	web::get_attr(th, "data-tools", tools)
+	web::get_attr(th, "data-final", fin)
+	has_got := web::get_attr(th, "data-got", got)
+	finish_request(slot)
+	if tools.len > 0 || has_got:
+		d i32 := web::create("div")
+		web::attr(d, "class", "msg assistant")
+		html byte[>..] ~= []
+		if tools.len > 0:
+			html.append("<div class=\"tool-group\">")
+			html.append(tools)
+			html.append("</div>")
+		md::render(html, fin)
+		web::html(d, html)
+		web::append(msgs, d)
+		web::release(d)
+	scroll_down(msgs);
+drag_start():
+	dv i32 := web::ev_target()
+	web::cls(dv, "dragging", true)
+	lb byte[>..] ~= []
+	rb byte[>..] ~= []
+	web::get_attr(dv, "data-left-pane", lb)
+	web::get_attr(dv, "data-right-pane", rb)
+	ln, lok := parse_int(lb)
+	rn, rok := parse_int(rb)
+	li := pane_index(ln)
+	ri := pane_index(rn)
+	if !lok || !rok || li < 0 || ri < 0:
+		web::release(dv)
+		return
+	drag_div = dv
+	drag_left = pane_els[li]
+	drag_right = pane_els[ri]
+	drag_x = web::ev_x()
+	r1 ~= web::Rect{0.0, 0.0, 0.0, 0.0}
+	r2 ~= web::Rect{0.0, 0.0, 0.0, 0.0}
+	web::rect(drag_left, r1)
+	web::rect(drag_right, r2)
+	drag_lw = r1.w
+	drag_rw = r2.w
+	dragging = true
+	if !drag_ready:
+		web::listen(web::DOCUMENT, "mousemove", T_MOVE, 0)
+		web::listen(web::DOCUMENT, "mouseup", T_UP, 0)
+		drag_ready = true;
+drag_move():
+	if !dragging: return
+	dist := web::ev_x() - drag_x
+	lw := max(280.0, drag_lw + dist)
+	rw := max(280.0, drag_rw - dist)
+	s byte[>..] ~= []
+	format(s, lw, "px")
+	web::style(drag_left, "flex", "none")
+	web::style(drag_left, "width", s)
+	s.clear()
+	format(s, rw, "px")
+	web::style(drag_right, "flex", "none")
+	web::style(drag_right, "width", s);
+drag_end():
+	if !dragging: return
+	web::cls(drag_div, "dragging", false)
+	web::release(drag_div)
+	dragging = false;
+key_down():
+	t i32 := web::ev_target()
+	key byte[>..] ~= []
+	web::ev_key(key)
+	if key == "Enter" && (web::ev_mods() & 1) == 0:
+		web::ev_prevent()
+		p i32 := web::closest(t, ".pane")
+		ib byte[>..] ~= []
+		web::get_attr(p, "data-pane-id", ib)
+		id, ok := parse_int(ib)
+		send_pane(id, t);
+init():
+	container = web::el("pane-container")
+	p0 i32 := web::el("pane-0")
+	m0 i32 := web::query(p0, ".messages")
+	pane_ids.push(0)
+	pane_els.push(p0)
+	pane_msgs.push(m0)
+	web::listen(web::el("split-btn"), "click", T_SPLIT, 0);
+event(tag i32, kind i32):
+	if tag == T_SPLIT: create_pane()
+	if tag == T_STREAM:
+		if kind == web::EV_CHUNK: on_chunk()
+		if kind == web::EV_FETCH: on_end()
+	if tag == T_MODELS:
+		if kind == web::EV_FETCH: models_done()
+	if tag == T_KEY: key_down()
+	if tag == T_INPUT: auto_resize(web::ev_target())
+	if tag == T_DOWN: drag_start()
+	if tag == T_MOVE: drag_move()
+	if tag == T_UP: drag_end();
+act(verb const byte[:], arg const byte[:]):
+	if verb == "create": create_pane()
+	if verb == "close":
+		id, ok := parse_int(arg)
+		close_pane(id)
+	if verb == "send":
+		id, ok := parse_int(arg)
+		ta i32 := web::query(web::parent(core::act_el), "textarea")
+		send_pane(id, ta);

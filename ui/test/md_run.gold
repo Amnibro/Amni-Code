@@ -1,0 +1,11 @@
+use std
+use os
+use json
+into md_run.he
+lang he
+
+```he
+use ..md
+```
+
+`main()` is the parity runner for the `md` module. It takes the path of a case file from the first command line argument after the program name (`os::args`, index 1), and reads the whole file with `os::read_file`; when there is no argument or the file cannot be read it writes "cannot read cases" and a line feed with `os::write_stderr` and returns. It makes one result byte buffer `res` and one scratch byte buffer `out`, and two json documents `d` and `wd`. It splits the file text at line feeds and handles every line that is not empty, in order, as one case: clear `out`, parse the line into `d` with `json::parse` (the root is an array), and take element 0 of the root as the kind string and element 1 and element 2 as the arguments, all via `json::element` and `json::as_string`. The kind "md" calls `md::render` with the text of element 1; "inl" calls `md::inline`; "esc" calls `md::esc`; "esc_html" calls `md::esc_html`; "diff" calls `md::diff_line`; each of these gives a result text in `out`. The kind "hl" calls `md::hl` with the text of element 1 as source and the text of element 2 as language, and when it gives false the case result is the word null. The kind "size" calls `md::fmt_size` with element 1 read as a real by `json::as_f64`. The kind "widget" has a string as element 1 holding json text; parse that text into the second document `wd` with `json::parse` and call `md::widget` with `out`, `wd` and the root node that `json::parse` gave. For every case except a false "hl", append `json::format_string` of `out` to `res`, and append the word null for the false "hl"; then always append a line feed to `res`. After the last line write `res` with `os::write_stdout` once.

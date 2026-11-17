@@ -2222,7 +2222,6 @@ fn _asset(body:&'static [u8],ct:&'static str)->Response{
     r
 }
 async fn serve_dual_css()->impl IntoResponse{_asset(include_str!("../static/dual-skin.css").as_bytes(),"text/css; charset=utf-8")}
-async fn serve_dual_js()->impl IntoResponse{_asset(include_str!("../static/dual-skin.js").as_bytes(),"application/javascript; charset=utf-8")}
 async fn serve_archivo()->impl IntoResponse{_asset(include_bytes!("../static/fonts/archivo-var.woff2"),"font/woff2")}
 async fn serve_sourceserif()->impl IntoResponse{_asset(include_bytes!("../static/fonts/sourceserif4-var.woff2"),"font/woff2")}
 async fn serve_archivo_ext()->impl IntoResponse{_asset(include_bytes!("../static/fonts/archivo-var-ext.woff2"),"font/woff2")}
@@ -2249,7 +2248,9 @@ async fn serve_vendor(axum::extract::Path(path): axum::extract::Path<String>) ->
     }
 }
 async fn serve_ui_css()->impl IntoResponse{_asset(include_str!("../static/ui.css").as_bytes(),"text/css; charset=utf-8")}
-async fn serve_ui_js()->impl IntoResponse{_asset(include_str!("../static/ui.js").as_bytes(),"application/javascript; charset=utf-8")}
+async fn serve_start_js()->impl IntoResponse{_asset(include_bytes!("../static/start.js"),"application/javascript; charset=utf-8")}
+async fn serve_helium_js()->impl IntoResponse{_asset(include_bytes!("../static/helium.js"),"application/javascript; charset=utf-8")}
+async fn serve_ui_wasm()->impl IntoResponse{_asset(include_bytes!("../static/ui.wasm"),"application/wasm")}
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt::init();
@@ -2369,9 +2370,10 @@ async fn main() -> anyhow::Result<()> {
     let router = Router::new()
         .route("/", get(serve_ui))
         .route("/assets/dual-skin.css", get(serve_dual_css))
-        .route("/assets/dual-skin.js", get(serve_dual_js))
         .route("/assets/ui.css", get(serve_ui_css))
-        .route("/assets/ui.js", get(serve_ui_js))
+        .route("/assets/start.js", get(serve_start_js))
+        .route("/assets/helium.js", get(serve_helium_js))
+        .route("/assets/ui.wasm", get(serve_ui_wasm))
         .route("/vendor/{*path}", get(serve_vendor))
         .route("/assets/fonts/archivo-var.woff2", get(serve_archivo))
         .route("/assets/fonts/archivo-var-ext.woff2", get(serve_archivo_ext))

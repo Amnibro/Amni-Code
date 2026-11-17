@@ -1,0 +1,12 @@
+use web
+use core
+use md
+use settings
+into settings_root.he
+lang he
+
+`main()` calls `core::init` and `settings::init`, then listens on `web::BODY` for "click" with tag 1 and for "change" with tag 2, both with no flags.
+
+`run_actions()` takes queued actions from core with `core::take` into two scratch buffers until none remain. For each, when the name is "settings.open" or the name starts with "settings." it calls `settings::act` with the part of the name after "settings." and the argument; any other name is ignored.
+
+`he_event(tag, kind)` is exported to the page. For tag 1 it finds `web::closest` of `web::ev_target()` with the selector "[data-act]"; when there is one it reads its "data-act" and "data-arg" attributes (argument empty when missing) and queues them with that element through `core::post_el`. For tag 2 it does the same with the selector "[data-change]" and "data-change", using the element's "value" property (`web::get_prop`) as the argument. A tag from 10 to 99 calls `core::event(tag, kind)`. A tag from 200 to 299 calls `settings::event(tag, kind)`. After any event it calls `run_actions`.

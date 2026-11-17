@@ -1,0 +1,1178 @@
+=== -1c80f57c79da45ab
+use web
+use json
+use md
+use core
+namespace chat
+=== 40c08fda8666281b
+T_INPUT i32 := 100
+T_KEYDOWN i32 := 101
+T_SEND i32 := 102
+T_INTERRUPT i32 := 103
+T_STEER i32 := 104
+T_NEW i32 := 105
+T_HISTORY i32 := 106
+T_DIFF i32 := 107
+T_MSGS i32 := 108
+T_STREAM i32 := 110
+T_UNDO i32 := 111
+T_ACCEPT i32 := 112
+T_IGNORE i32 := 113
+T_STEERED i32 := 114
+T_CONFIRM_UNDO i32 := 115
+T_CONFIRM_CLEAR i32 := 116
+T_COPY_RESET i32 := 117
+T_FMT i32 := 118
+T_TIME i32 := 119
+=== -230f34f3f3f88938
+var session byte[>..]
+var current_id int = 0
+var new_title byte[>..]
+var stream_id i32 = 0
+var sbuf byte[>..]
+var final_msg byte[>..]
+var got_message bool = false
+var tools_json byte[>..]
+var widgets_json byte[>..]
+var n_tools int = 0
+var n_widgets int = 0
+var diff_text byte[>..]
+var dd json::Doc
+var droot int = -1
+var hd json::Doc
+var ed json::Doc
+var td json::Doc
+var wd json::Doc
+var pd json::Doc
+var copy_q i32[>..]
+var copy_head int = 0
+var date_fmt i32 = 0
+var time_ids i32[>..]
+var time_els i32[>..]
+var steer_ids i32[>..]
+var steer_ends int[>..]
+var steer_texts byte[>..]
+=== -6c21d9637b75cd2c
+str_of(d json::Doc&, n int, key const byte[:]) const byte[:]:
+	if n < 0: return ""
+	m := json::member(d, n, key)
+	if m < 0: return ""
+	s, ok := json::as_string(d, m)
+	if !ok: return ""
+	return s
+int_of(d json::Doc&, n int, key const byte[:]) int:
+	if n < 0: return 0
+	m := json::member(d, n, key)
+	if m < 0: return 0
+	v, ok := json::as_i64(d, m)
+	if !ok: return 0
+	return v
+=== -6454d59acc49a855
+utf16_len(s const byte[:]) int:
+	n ~= 0
+	for c s:
+		if (c & 0xC0) != 0x80:
+			n += 1
+		if c >= 0xF0:
+			n += 1
+	return n
+utf16_cut(s const byte[:], n int) const byte[:]:
+	u ~= 0
+	i ~= 0
+	while i < s.len:
+		c := s[i]
+		l ~= 1
+		w ~= 1
+		if c >= 0xF0:
+			l = 4
+			w = 2
+		else if c >= 0xE0:
+			l = 3
+		else if c >= 0xC0:
+			l = 2
+		if u + w > n: break
+		u += w
+		i += l
+	if i > s.len: i = s.len
+	return s[..i]
+=== 52628f1e0c7400e9
+line_count(s const byte[:]) int:
+	n ~= 1
+	for c s:
+		if c == 10: n += 1
+	return n
+line_at(s const byte[:], k int) const byte[:]:
+	start ~= 0
+	idx ~= 0
+	for i s.len:
+		if s[i] == 10:
+			if idx == k: return s[start..i]
+			idx += 1
+			start = i + 1
+	if idx == k: return s[start..]
+	return s[..0]
+=== -7e3daac1ce82474b
+scroll_down():
+	m i32 := web::el("messages")
+	web::prop_num(m, "scrollTop", web::get_num(m, "scrollHeight"));
+=== 6ac5679f6b79bc78
+set_generating(on bool):
+	web::prop_bool(web::el("send"), "disabled", on)
+	web::prop_bool(web::el("interrupt"), "disabled", !on)
+	web::prop_bool(web::el("steer"), "disabled", !on);
+=== -5bd94c6c5151d438
+focus_input():
+	web::call(web::el("input"), "focus");
+=== 2d6c555679d3af93
+auto_resize():
+	h i32 := web::el("input")
+	web::style(h, "height", "auto")
+	sh := web::get_num(h, "scrollHeight")
+	v := min(sh, 150.0)
+	b byte[>..] ~= []
+	format(b, v as int, "px")
+	web::style(h, "height", b);
+=== -f7cf4e3752a5cab
+toggle_diff():
+	c i32 := web::el("diff-col")
+	web::cls(c, "open", !web::has_cls(c, "open"))
+	t i32 := web::el("diff-toggle")
+	web::cls(t, "active", !web::has_cls(t, "active"));
+=== 2858b4efaf826b8b
+chat_entry(out byte[>..]&, title const byte[:]):
+	out.append("{")
+	json::format_key(out, "id")
+	json::format_int(out, current_id)
+	out.append(",")
+	json::format_key(out, "title")
+	json::format_string(out, title)
+	out.append(",")
+	json::format_key(out, "date")
+	json::format_int(out, (web::epoch_ms()) as int)
+	out.append(",")
+	json::format_key(out, "html")
+	h byte[>..] ~= []
+	web::get_prop(web::el("messages"), "innerHTML", h)
+	json::format_string(out, h)
+	out.append(",")
+	json::format_key(out, "diff")
+	if diff_text.len == 0:
+		out.append("[]")
+	else:
+		out.append(diff_text)
+	out.append(",")
+	json::format_key(out, "sessionId")
+	if session.len == 0:
+		json::format_null(out)
+	else:
+		json::format_string(out, session)
+	out.append("}");
+=== -4de08c542032a5e5
+hist_load() int:
+	t byte[>..] ~= []
+	if !web::store_get("amniHistory", t): return -1
+	if t.len == 0: return -1
+	root, err := json::parse(t, hd)
+	if root < 0: return -1
+	if json::kind(hd, root) != json::K_ARR: return -1
+	return root
+=== 235150049c01ba2b
+save_chat():
+	if current_id == 0: return
+	root := hist_load()
+	found ~= -1
+	n ~= 0
+	if root >= 0:
+		n = json::count(hd, root)
+		for j n:
+			e := json::element(hd, root, j)
+			if found < 0 && int_of(hd, e, "id") == current_id: found = e
+	oldt := str_of(hd, found, "title")
+	title byte[>..] ~= []
+	if found >= 0 && oldt.len > 0:
+		title.append(oldt)
+	else if new_title.len > 0:
+		title.append(new_title)
+	else:
+		title.append("New Chat")
+	out byte[>..] ~= []
+	out.append("[")
+	if found < 0:
+		chat_entry(out, title)
+		if n > 0: out.push(',')
+	for j n:
+		e := json::element(hd, root, j)
+		if j > 0: out.push(',')
+		if e == found:
+			chat_entry(out, title)
+		else:
+			json::format_node(out, hd, e)
+	out.append("]")
+	web::store_set("amniHistory", out)
+	new_title.clear();
+=== -774135e3ad8723f0
+diff_count() int:
+	if droot < 0: return 0
+	return json::count(dd, droot)
+diff_clear():
+	diff_text.clear()
+	droot = -1;
+diff_set(text const byte[:]):
+	tmp byte[>..] ~= []
+	tmp.append(text)
+	diff_text.clear()
+	diff_text.append(tmp)
+	r, err := json::parse(diff_text, dd)
+	if r < 0 || json::kind(dd, r) != json::K_ARR:
+		diff_clear()
+		return
+	droot = r;
+=== -7f970cfdb7566e11
+diff_push(file const byte[:], kind const byte[:], removed const byte[:], added const byte[:]):
+	e byte[>..] ~= []
+	e.append("{")
+	json::format_key(e, "file")
+	json::format_string(e, file)
+	e.append(",")
+	json::format_key(e, "type")
+	json::format_string(e, kind)
+	e.append(",")
+	json::format_key(e, "removed")
+	json::format_string(e, removed)
+	e.append(",")
+	json::format_key(e, "added")
+	json::format_string(e, added)
+	e.append("}")
+	nt byte[>..] ~= []
+	if diff_text.len == 0:
+		nt.append("[")
+	else:
+		nt.append(diff_text[..diff_text.len - 1])
+		nt.push(',')
+	nt.append(e)
+	nt.push(']')
+	diff_set(nt);
+=== -6f4de4c5180ad93b
+diff_from_tool(d json::Doc&, n int):
+	tool := str_of(d, n, "tool")
+	inp := json::member(d, n, "input")
+	path := str_of(d, inp, "path")
+	file ~= path
+	if path.len == 0: file = "unknown"
+	removed ~= ""
+	added ~= ""
+	if tool == "edit_file":
+		removed = str_of(d, inp, "old_string")
+		added = str_of(d, inp, "new_string")
+	else if tool == "write_file":
+		added = str_of(d, inp, "content")
+	diff_push(file, tool, removed, added)
+	render_diff()
+	if current_id != 0: save_chat();
+=== 35b111e61eb47edf
+diff_icon(out byte[>..]&, file const byte[:]):
+	dot ~= -1
+	for i file.len:
+		if file[i] == '.': dot = i
+	ext := if dot < 0 { file } else { file[dot + 1..] }
+	e byte[>..] ~= []
+	for c ext:
+		if c >= 'A' && c <= 'Z': e.push(c + 32)
+		else: e.push(c)
+	if e == "js" || e == "ts":
+		out.append("📜")
+	else if e == "py":
+		out.append("🐍")
+	else if e == "rs":
+		out.append("🦀")
+	else if e == "html":
+		out.append("🌐")
+	else if e == "css":
+		out.append("🎨")
+	else if e == "json":
+		out.append("📋")
+	else:
+		out.append("📄")
+	return
+=== 46817a83a5dbbee8
+diff_row(out byte[>..]&, kind const byte[:], num int, sign const byte[:], text const byte[:]):
+	out.append("<div class=\"diff-row ")
+	out.append(kind)
+	out.append("\"><span class=\"diff-gutter\">")
+	format(out, num)
+	out.append("</span><span class=\"diff-sign\">")
+	out.append(sign)
+	out.append("</span><span class=\"diff-code\">")
+	md::diff_line(out, text)
+	out.append("</span></div>");
+=== -668b4ce178d4b84f
+diff_fold(out byte[>..]&, count int):
+	out.append("<div class=\"diff-row ctx-fold\"><span class=\"diff-gutter\">")
+	out.append("···")
+	out.append("</span><span class=\"diff-sign\"> </span><span class=\"diff-code\" style=\"color:var(--dim);font-style:italic\">")
+	format(out, count)
+	out.append(" unchanged lines</span></div>");
+=== -286c377baa2da63a
+diff_section(out byte[>..]&, file const byte[:], kind const byte[:], removed const byte[:], added const byte[:]):
+	out.append("<div class=\"diff-section\"><div class=\"diff-file-header\">")
+	diff_icon(out, file)
+	out.append(" <span class=\"diff-filename\">")
+	md::esc_html(out, file)
+	out.append("</span> ")
+	if kind == "write_file":
+		out.append("<span class=\"diff-badge write\">CREATE</span>")
+	else:
+		out.append("<span class=\"diff-badge edit\">EDIT</span>")
+	out.append("</div><div class=\"diff-lines\">")
+	if kind == "write_file":
+		cnt := line_count(added)
+		for k cnt:
+			diff_row(out, "add", k + 1, "+", line_at(added, k))
+	else:
+		old_n := if removed.len == 0 { 0 } else { line_count(removed) }
+		new_n := if added.len == 0 { 0 } else { line_count(added) }
+		i ~= 0
+		while i < old_n && i < new_n && line_at(removed, i) == line_at(added, i):
+			i += 1
+		j1 ~= old_n - 1
+		j2 ~= new_n - 1
+		while j1 >= i && j2 >= i && line_at(removed, j1) == line_at(added, j2):
+			j1 -= 1
+			j2 -= 1
+		pre := max(0, i - 2)
+		if pre > 0: diff_fold(out, pre)
+		for k pre..i:
+			diff_row(out, "ctx", k + 1, " ", line_at(removed, k))
+		for k i..j1 + 1:
+			diff_row(out, "rm", k + 1, "-", line_at(removed, k))
+		for k i..j2 + 1:
+			diff_row(out, "add", k + 1, "+", line_at(added, k))
+		post := min(old_n - 1, j1 + 2)
+		for k j1 + 1..post + 1:
+			diff_row(out, "ctx", k + 1, " ", line_at(removed, k))
+		if j1 < old_n - 3: diff_fold(out, old_n - j1 - 3)
+	out.append("</div></div>");
+=== 30e8bcfae8eeab68
+render_diff():
+	body i32 := web::el("diff-body")
+	if diff_count() == 0:
+		web::html(body, "<p style=\"color:var(--dim);padding:20px;text-align:center\">No changes yet</p>")
+		return
+	out byte[>..] ~= []
+	c := diff_count()
+	for j c:
+		e := json::element(dd, droot, j)
+		diff_section(out, str_of(dd, e, "file"), str_of(dd, e, "type"), str_of(dd, e, "removed"), str_of(dd, e, "added"))
+	web::html(body, out)
+	if !web::has_cls(web::el("diff-col"), "open"): toggle_diff();
+=== 383714c45ed01f3a
+add_lines(out byte[>..]&, text const byte[:], sign const byte[:], color const byte[:], limit int) int:
+	n := line_count(text)
+	for k n:
+		if limit >= 0 && k >= limit: break
+		out.append("<div style=\"color:")
+		out.append(color)
+		out.append("\">")
+		out.append(sign)
+		out.push(' ')
+		md::esc_html(out, line_at(text, k))
+		out.append("</div>")
+	return n
+=== -358de99a529b6e24
+json_pretty(out byte[>..]&, d json::Doc&, n int, depth int):
+	if n < 0:
+		out.append("null")
+		return
+	md::stringify(out, d, n, true, depth);
+=== 31c0c8f79f59dfa4
+tool_detail(out byte[>..]&, d json::Doc&, n int):
+	tool := str_of(d, n, "tool")
+	output := str_of(d, n, "output")
+	inp := json::member(d, n, "input")
+	if tool == "edit_file" || tool == "write_file":
+		out.append("<div style=\"margin:4px 0;color:var(--text2)\">&#9472;&#9472; ")
+		md::esc_html(out, tool)
+		out.append(" &#8250; <strong>")
+		md::esc_html(out, str_of(d, inp, "path"))
+		out.append("</strong></div>")
+		if tool == "edit_file":
+			add_lines(out, str_of(d, inp, "old_string"), "-", "#ff5c5c", -1)
+			add_lines(out, str_of(d, inp, "new_string"), "+", "#3ddc84", -1)
+		else:
+			total := add_lines(out, str_of(d, inp, "content"), "+", "#3ddc84", 30)
+			if total > 30:
+				out.append("<div style=\"color:var(--dim)\">... ")
+				format(out, total - 30)
+				out.append(" more lines</div>")
+	else:
+		out.append("<div style=\"margin:4px 0;color:var(--text2)\">&#9472;&#9472; ")
+		md::esc_html(out, tool)
+		out.append(" &#9472;&#9472;</div>")
+		tmp byte[>..] ~= []
+		json_pretty(tmp, d, inp, 0)
+		out.append("<div>")
+		md::esc_html(out, utf16_cut(tmp, 300))
+		out.append("</div>")
+		if output.len > 0:
+			out.append("<div style=\"color:var(--dim)\">")
+			md::esc_html(out, utf16_cut(output, 300))
+			if utf16_len(output) > 300: out.append("...")
+			out.append("</div>")
+	return
+=== -7c657d130b04d0cc
+tool_group(out byte[>..]&, d json::Doc&, arr int):
+	out.append("<div class=\"tool-group\">")
+	c := json::count(d, arr)
+	for j c:
+		t := json::element(d, arr, j)
+		out.append("<span class=\"tool-badge ")
+		if str_of(d, t, "status") == "success":
+			out.append("success")
+		else:
+			out.append("error")
+		out.append("\">&#9889; ")
+		md::esc_html(out, str_of(d, t, "tool"))
+		out.append("</span>")
+	out.append("<button class=\"tool-toggle\">&#9656; details</button><div class=\"tool-detail\" style=\"display:none\">")
+	for j c:
+		tool_detail(out, d, json::element(d, arr, j))
+	out.append("</div></div>");
+=== -51cf1bb461554975
+add_msg(role const byte[:], content const byte[:], tools const byte[:], widgets const byte[:]):
+	w i32 := web::el("welcome")
+	if w != 0:
+		web::remove(w)
+		web::release(w)
+	html byte[>..] ~= []
+	if role == "user":
+		md::esc_html(html, content)
+	else:
+		tr ~= -1
+		if role == "assistant" && tools.len > 0:
+			pr, perr := json::parse(tools, td)
+			tr = pr
+		if tr >= 0:
+			tool_group(html, td, tr)
+			md::render(html, content)
+			c := json::count(td, tr)
+			for j c:
+				te := json::element(td, tr, j)
+				tn := str_of(td, te, "tool")
+				if tn == "write_file" || tn == "edit_file": diff_from_tool(td, te)
+		else:
+			md::render(html, content)
+	if role == "assistant" && widgets.len > 0:
+		wr, werr := json::parse(widgets, wd)
+		if wr >= 0:
+			for j json::count(wd, wr):
+				md::widget(html, wd, json::element(wd, wr, j))
+	d i32 := web::create("div")
+	cl byte[>..] ~= []
+	cl.append("msg ")
+	cl.append(role)
+	web::attr(d, "class", cl)
+	web::html(d, html)
+	web::append(web::el("messages"), d)
+	web::release(d)
+	scroll_down()
+	if current_id != 0: save_chat();
+=== -fef5f2e1d1bc1b7
+show_thinking():
+	d i32 := web::create("div")
+	web::attr(d, "class", "msg assistant")
+	web::attr(d, "id", "thinking")
+	web::html(d, "<div class=\"thinking\"><span></span><span></span><span></span></div>")
+	web::append(web::el("messages"), d)
+	web::release(d)
+	scroll_down();
+=== 1e6e709cee306516
+update_thinking(text const byte[:]):
+	t i32 := web::el("thinking")
+	if t == 0: return
+	h byte[>..] ~= []
+	h.append("<div style=\"display:flex;align-items:center;gap:8px\"><div class=\"thinking\"><span></span><span></span><span></span></div><span style=\"font-size:12px;color:var(--dim)\">")
+	md::esc_html(h, text)
+	h.append("</span></div>")
+	web::html(t, h);
+=== 248239e3a543148a
+remove_thinking():
+	t i32 := web::el("thinking")
+	if t == 0: return
+	ls i32 := web::query(t, ".live-steps")
+	if ls != 0: web::release(ls)
+	web::remove(t)
+	web::release(t);
+=== -35cc3b87b335d5e
+live_icon(tool const byte[:]) const byte[:]:
+	if tool == "read_file": return "▤"
+	if tool == "write_file": return "✎"
+	if tool == "edit_file": return "✎"
+	if tool == "multi_edit": return "✎"
+	if tool == "run_command": return "›"
+	if tool == "list_directory": return "☰"
+	if tool == "search_files": return "⌕"
+	if tool == "web_fetch": return "⇣"
+	if tool == "web_search": return "⌕"
+	if tool == "run_tests": return "✓"
+	if tool == "run_lint": return "≋"
+	if tool == "run_format": return "¶"
+	if tool == "git_status": return "⎇"
+	if tool == "git_diff": return "±"
+	if tool == "git_add": return "+"
+	if tool == "git_commit": return "●"
+	if tool == "git_log": return "≡"
+	if tool == "find_definition": return "⌖"
+	return "⚙"
+=== -6afb38e82d4142c0
+live_arg(d json::Doc&, n int) const byte[:]:
+	inp := json::member(d, n, "input")
+	a := str_of(d, inp, "path")
+	if a.len > 0: return a
+	b := str_of(d, inp, "command")
+	if b.len > 0: return b
+	c := str_of(d, inp, "query")
+	if c.len > 0: return c
+	u := str_of(d, inp, "url")
+	if u.len > 0: return u
+	nm := str_of(d, inp, "name")
+	if nm.len > 0: return nm
+	m := str_of(d, inp, "message")
+	if m.len > 0: return m
+	return ""
+=== -1264bb2c1f485087
+live_steps() i32:
+	t i32 := web::el("thinking")
+	if t == 0: return 0
+	ls i32 ~= web::query(t, ".live-steps")
+	if ls == 0:
+		web::html(t, "<div class=\"live-head\"><div class=\"thinking\"><span></span><span></span><span></span></div><span class=\"live-title\">Working…</span></div><ol class=\"live-steps\"></ol>")
+		ls = web::query(t, ".live-steps")
+	return ls
+=== 1768c6c5cdce231a
+live_title(text const byte[:]):
+	t i32 := web::el("thinking")
+	if t == 0: return
+	h i32 := web::query(t, ".live-title")
+	if h != 0:
+		web::text(h, text)
+		web::release(h)
+	return
+=== -2310fffe5b634e5
+live_start(d json::Doc&, n int) i32:
+	ls i32 := live_steps()
+	if ls == 0: return 0
+	tool := str_of(d, n, "tool")
+	li i32 := web::create("li")
+	web::attr(li, "class", "step run")
+	web::attr(li, "data-tool", tool)
+	h byte[>..] ~= []
+	h.append("<span class=\"st-ico\">")
+	h.append(live_icon(tool))
+	h.append("</span><span class=\"st-name\">")
+	md::esc(h, tool)
+	h.append("</span><span class=\"st-arg\">")
+	md::esc(h, live_arg(d, n))
+	h.append("</span><span class=\"st-state\">running</span>")
+	web::html(li, h)
+	web::append(ls, li)
+	t byte[>..] ~= []
+	t.append("Running ")
+	t.append(tool)
+	t.append("…")
+	live_title(t)
+	scroll_down()
+	return li
+=== -6fffce21e9bfd803
+live_end(d json::Doc&, n int):
+	ls i32 := live_steps()
+	if ls == 0: return
+	tool := str_of(d, n, "tool")
+	status := str_of(d, n, "status")
+	output := str_of(d, n, "output")
+	step i32 ~= 0
+	cnt int := web::query_all(ls, "li.step.run")
+	for k cnt:
+		h i32 := web::list_at(k as i32)
+		a byte[>..] ~= []
+		if step == 0 && web::get_attr(h, "data-tool", a) && a == tool:
+			step = h
+		else:
+			web::release(h)
+	if step == 0: step = live_start(d, n)
+	web::cls(step, "run", false)
+	if status == "success":
+		web::cls(step, "ok", true)
+	else if status == "planned":
+		web::cls(step, "plan", true)
+	else:
+		web::cls(step, "err", true)
+	st i32 := web::query(step, ".st-state")
+	if st != 0:
+		if status == "success":
+			web::text(st, "done")
+		else:
+			web::text(st, status)
+		web::release(st)
+	if output.len > 0:
+		o i32 := web::create("div")
+		web::attr(o, "class", "st-out")
+		b byte[>..] ~= []
+		b.append(utf16_cut(output, 240))
+		if utf16_len(output) > 240: b.append("…")
+		web::text(o, b)
+		web::append(step, o)
+		web::release(o)
+	live_title("Thinking…")
+	web::release(step)
+	return
+=== -40cd38b6e6d29b6d
+new_chat():
+	session.clear()
+	diff_clear()
+	current_id = 0
+	new_title.clear()
+	web::html(web::el("messages"), "")
+	web::js_call(web::js_global("location"), "reload", "[]", T_IGNORE);
+=== -5ba842ba350a9b16
+show_history():
+	render_history()
+	web::cls(web::el("history-panel"), "open", true)
+	web::cls(web::el("settings-overlay"), "open", true);
+=== 06d4fae978b2bb14
+render_history():
+	root := hist_load()
+	l i32 := web::el("history-list")
+	if root < 0 || json::count(hd, root) == 0:
+		web::html(l, "<p style=\"color:var(--dim);font-size:12px;text-align:center\">No recent chats</p>")
+		return
+	out byte[>..] ~= []
+	for j json::count(hd, root):
+		e := json::element(hd, root, j)
+		id := int_of(hd, e, "id")
+		date := int_of(hd, e, "date")
+		out.append("<div class=\"hist-item\" data-act=\"chat.load\" data-arg=\"")
+		format(out, id)
+		out.append("\"><button class=\"hist-del\" data-act=\"chat.delete\" data-arg=\"")
+		format(out, id)
+		out.append("\">&#10005;</button><div class=\"hist-title\">")
+		md::esc_html(out, str_of(hd, e, "title"))
+		out.append("</div><div class=\"hist-time\" data-ts=\"")
+		format(out, date)
+		out.append("\"></div></div>")
+	web::html(l, out)
+	fill_times();
+=== 3109b72bac07479d
+fill_times():
+	if date_fmt == 0: return
+	l i32 := web::el("history-list")
+	cnt int := web::query_all(l, ".hist-time")
+	for k cnt:
+		h i32 := web::list_at(k as i32)
+		a byte[>..] ~= []
+		if web::get_attr(h, "data-ts", a) && a.len > 0:
+			args byte[>..] ~= []
+			args.push('[')
+			args.append(a)
+			args.push(']')
+			id i32 := web::js_call(date_fmt, "format", args, T_TIME)
+			time_ids.push(id)
+			time_els.push(h)
+		else:
+			web::release(h)
+	return
+=== 40f2e8388465d4c5
+on_time():
+	id i32 := web::ev_id()
+	pos ~= -1
+	for k time_ids.len:
+		if time_ids[k] == id: pos = k
+	if pos < 0: return
+	r byte[>..] ~= []
+	if web::js_result(id, r):
+		rr, err := json::parse(r, ed)
+		if rr >= 0 && json::kind(ed, rr) == json::K_STR:
+			s, ok := json::as_string(ed, rr)
+			if ok: web::text(time_els[pos], s)
+	web::release(time_els[pos])
+	time_ids[pos] = 0
+	z ~= true
+	for v time_ids:
+		if v != 0: z = false
+	if z:
+		time_ids.clear()
+		time_els.clear()
+	return
+=== -208ee21477f60c45
+load_chat(id int):
+	root := hist_load()
+	if root < 0: return
+	found ~= -1
+	for j json::count(hd, root):
+		e := json::element(hd, root, j)
+		if found < 0 && int_of(hd, e, "id") == id: found = e
+	if found < 0: return
+	current_id = id
+	session.clear()
+	session.append(str_of(hd, found, "sessionId"))
+	dm := json::member(hd, found, "diff")
+	if dm < 0:
+		diff_clear()
+	else:
+		t byte[>..] ~= []
+		json::format_node(t, hd, dm)
+		diff_set(t)
+	m i32 := web::el("messages")
+	web::html(m, str_of(hd, found, "html"))
+	cnt int := web::query_all(m, "[onclick]")
+	for k cnt:
+		h i32 := web::list_at(k as i32)
+		web::del_attr(h, "onclick")
+		web::release(h)
+	scroll_down()
+	render_diff()
+	web::cls(web::el("history-panel"), "open", false)
+	web::cls(web::el("settings-overlay"), "open", false);
+=== 73e887dbc43dd301
+delete_chat(id int):
+	root := hist_load()
+	out byte[>..] ~= []
+	out.push('[')
+	fst ~= true
+	if root >= 0:
+		for j json::count(hd, root):
+			e := json::element(hd, root, j)
+			if int_of(hd, e, "id") != id:
+				if !fst: out.push(',')
+				fst = false
+				json::format_node(out, hd, e)
+	out.push(']')
+	web::store_set("amniHistory", out)
+	if id == current_id:
+		new_chat()
+	else:
+		render_history()
+	return
+=== 78723255ef0aec35
+clear_history():
+	a byte[>..] ~= []
+	a.push('[')
+	json::format_string(a, "Clear all chat history?")
+	a.push(']')
+	web::js_call(web::WINDOW, "confirm", a, T_CONFIRM_CLEAR);
+=== -c28055b4cd5575a
+confirmed() bool:
+	r byte[>..] ~= []
+	if !web::js_result(web::ev_id(), r): return false
+	return r == "true"
+=== -526e12f322f38e04
+clear_history_go():
+	web::store_set("amniHistory", "[]")
+	new_chat()
+	render_history();
+=== 006d411f3207180b
+post_json(url const byte[:], tag i32, body const byte[:]) i32:
+	return web::request(url, "POST", "{\"Content-Type\":\"application/json\"}", body, tag, 0)
+=== 19180a07f46f7674
+session_body(out byte[>..]&):
+	out.append("{")
+	json::format_key(out, "session_id")
+	json::format_string(out, session)
+	out.append("}");
+=== 27df8c4acfc4a774
+handle_sse(name const byte[:], data const byte[:]) bool:
+	r, err := json::parse(data, ed)
+	if r < 0:
+		web::warn("SSE parse error:")
+		return true
+	if name == "session":
+		session.clear()
+		session.append(str_of(ed, r, "session_id"))
+	else if name == "thinking":
+		t := str_of(ed, r, "text")
+		if t.len > 0: update_thinking(t)
+	else if name == "tool_start":
+		h i32 := live_start(ed, r)
+		if h != 0: web::release(h)
+	else if name == "tool_result":
+		if n_tools > 0: tools_json.push(',')
+		tools_json.append(data)
+		n_tools += 1
+		live_end(ed, r)
+		tn := str_of(ed, r, "tool")
+		if tn == "write_file" || tn == "edit_file": diff_from_tool(ed, r)
+	else if name == "message":
+		final_msg.clear()
+		final_msg.append(str_of(ed, r, "message"))
+		got_message = true
+	else if name == "widget":
+		if n_widgets > 0: widgets_json.push(',')
+		widgets_json.append(data)
+		n_widgets += 1
+	else if name == "error":
+		remove_thinking()
+		msg ~= str_of(ed, r, "error")
+		if msg.len == 0: msg = "Unknown error"
+		if starts_with(msg, "Error: "): msg = msg[7..]
+		add_msg("system error", msg, "", "")
+		end_turn()
+		stop_stream()
+		return false
+	else if name == "interrupted":
+		remove_thinking()
+		add_msg("system", "Generation interrupted.", "", "")
+		end_turn()
+		stop_stream()
+		return false
+	return true
+=== -4a1fce326f9a39db
+end_turn():
+	set_generating(false)
+	focus_input();
+=== 2727e4b023da9686
+stop_stream():
+	web::fetch_abort(stream_id)
+	stream_id = 0;
+=== -1799e5d804ac692e
+send():
+	raw byte[>..] ~= []
+	web::get_prop(web::el("input"), "value", raw)
+	text := trim(raw)
+	if text.len == 0 || stream_id != 0: return
+	if current_id == 0:
+		current_id = (web::epoch_ms()) as int
+		new_title.clear()
+		new_title.append(utf16_cut(text, 40))
+		new_title.append("...")
+	web::prop(web::el("input"), "value", "")
+	auto_resize()
+	set_generating(true)
+	add_msg("user", text, "", "")
+	show_thinking()
+	sbuf.clear()
+	final_msg.clear()
+	tools_json.clear()
+	widgets_json.clear()
+	got_message = false
+	n_tools = 0
+	n_widgets = 0
+	b byte[>..] ~= []
+	b.append("{")
+	json::format_key(b, "message")
+	json::format_string(b, text)
+	b.append(",")
+	json::format_key(b, "session_id")
+	if session.len == 0:
+		json::format_null(b)
+	else:
+		json::format_string(b, session)
+	b.append(",")
+	json::format_key(b, "working_dir")
+	dirv byte[>..] ~= []
+	cfg i32 := web::el("cfg-dir")
+	if cfg != 0: web::get_prop(cfg, "value", dirv)
+	json::format_string(b, dirv)
+	b.append("}")
+	stream_id = web::stream("/api/chat", "POST", "{\"Content-Type\":\"application/json\"}", b, T_STREAM);
+=== 3c6943edf25c8e59
+on_chunk():
+	id i32 := web::ev_id()
+	bytes byte[>..] ~= []
+	web::fetch_take(id, bytes)
+	web::fetch_free(id)
+	if web::ev_status() != stream_id: return
+	sbuf.append(bytes)
+	ev byte[>..] ~= []
+	dt byte[>..] ~= []
+	while core::sse_take(sbuf, ev, dt):
+		if dt.len > 0:
+			if !handle_sse(ev, dt): break
+	return
+=== -20b476d12430db28
+on_stream_end():
+	id i32 := web::ev_id()
+	web::fetch_free(id)
+	if id != stream_id: return
+	stream_id = 0
+	remove_thinking()
+	if web::ev_status() == 0:
+		add_msg("system", "Connection error &mdash; is the server running? Check Settings for provider config.", "", "")
+	else if got_message || n_tools > 0 || n_widgets > 0:
+		tools byte[>..] ~= []
+		if n_tools > 0:
+			tools.push('[')
+			tools.append(tools_json)
+			tools.push(']')
+		widgets byte[>..] ~= []
+		if n_widgets > 0:
+			widgets.push('[')
+			widgets.append(widgets_json)
+			widgets.push(']')
+		add_msg("assistant", final_msg, tools, widgets)
+	end_turn();
+=== 4fb3bcecae945489
+undo_changes():
+	if session.len == 0 || diff_count() == 0: return
+	a byte[>..] ~= []
+	a.push('[')
+	json::format_string(a, "Undo all changes from this session?")
+	a.push(']')
+	web::js_call(web::WINDOW, "confirm", a, T_CONFIRM_UNDO);
+=== -53e308ceb064f143
+undo_go():
+	b byte[>..] ~= []
+	session_body(b)
+	post_json("/api/undo", T_UNDO, b);
+=== -3ea2c17d2fe0bcfc
+on_undo():
+	id i32 := web::ev_id()
+	bytes byte[>..] ~= []
+	web::fetch_take(id, bytes)
+	web::fetch_free(id)
+	if web::ev_status() == 0:
+		add_msg("system", "Undo failed", "", "")
+		return
+	rt, err := json::parse(bytes, ed)
+	if rt < 0:
+		add_msg("system", "Undo failed", "", "")
+		return
+	rv := json::member(ed, rt, "reverted")
+	if rv >= 0 && json::kind(ed, rv) == json::K_ARR && json::count(ed, rv) > 0:
+		b byte[>..] ~= []
+		b.append("Reverted ")
+		format(b, json::count(ed, rv))
+		b.append(" file(s)")
+		add_msg("system", b, "", "")
+		diff_clear()
+		render_diff()
+	else:
+		add_msg("system", "No changes to undo", "", "")
+	return
+=== 6581109f4f31d96c
+accept_changes():
+	if session.len == 0 || diff_count() == 0: return
+	b byte[>..] ~= []
+	session_body(b)
+	post_json("/api/accept", T_ACCEPT, b);
+=== -1a3ae29e7081e35d
+on_accept():
+	id i32 := web::ev_id()
+	web::fetch_free(id)
+	if web::ev_status() != 0:
+		add_msg("system", "Changes accepted", "", "")
+		diff_clear()
+		render_diff()
+	return
+=== 2c992c84fb4bde61
+interrupt_gen():
+	if session.len == 0: return
+	b byte[>..] ~= []
+	session_body(b)
+	post_json("/api/interrupt", T_IGNORE, b);
+=== 4e9369e194a47004
+steer_gen():
+	raw byte[>..] ~= []
+	web::get_prop(web::el("input"), "value", raw)
+	text := trim(raw)
+	if text.len == 0 || session.len == 0: return
+	web::prop(web::el("input"), "value", "")
+	auto_resize()
+	b byte[>..] ~= []
+	b.append("{")
+	json::format_key(b, "session_id")
+	json::format_string(b, session)
+	b.append(",")
+	json::format_key(b, "message")
+	json::format_string(b, text)
+	b.append("}")
+	id := post_json("/api/steer", T_STEERED, b)
+	steer_ids.push(id)
+	steer_texts.append(text)
+	steer_ends.push(steer_texts.len);
+=== -4c8bc3d4801bc012
+on_steer():
+	id i32 := web::ev_id()
+	bytes byte[>..] ~= []
+	web::fetch_take(id, bytes)
+	web::fetch_free(id)
+	pos ~= -1
+	for k steer_ids.len:
+		if steer_ids[k] == id: pos = k
+	if pos < 0: return
+	start ~= 0
+	if pos > 0: start = steer_ends[pos - 1]
+	txt byte[>..] ~= []
+	txt.append(steer_texts[start..steer_ends[pos]])
+	steer_ids[pos] = 0
+	z ~= true
+	for v steer_ids:
+		if v != 0: z = false
+	if z:
+		steer_ids.clear()
+		steer_ends.clear()
+		steer_texts.clear()
+	good ~= false
+	if web::ev_status() != 0:
+		r, err := json::parse(bytes, ed)
+		if r >= 0 && str_of(ed, r, "status") == "steered": good = true
+	if good:
+		b byte[>..] ~= []
+		b.append("[STEER: ")
+		b.append(txt)
+		b.append("]")
+		add_msg("user", b, "", "")
+	else:
+		add_msg("system", "Steer failed", "", "")
+	return
+=== -37c8e2b3b7780df6
+copy_code(btn i32):
+	cb i32 := web::closest(btn, ".cb")
+	txt byte[>..] ~= []
+	if cb != 0:
+		pre i32 := web::query(cb, "pre")
+		if pre != 0:
+			web::get_prop(pre, "innerText", txt)
+			web::release(pre)
+		web::release(cb)
+	web::clipboard(txt)
+	web::text(btn, "copied")
+	copy_q.push(btn)
+	web::timer(1200, T_COPY_RESET);
+=== -19d04368e914aaaa
+toggle_detail(btn i32):
+	p i32 := web::parent(btn)
+	d i32 := web::query(p, ".tool-detail")
+	if d == 0:
+		web::release(p)
+		return
+	st byte[>..] ~= []
+	web::get_attr(d, "style", st)
+	hit ~= false
+	for i st.len:
+		if i + 4 <= st.len && st[i..i + 4] == "none": hit = true
+	if hit:
+		web::style(d, "display", "block")
+	else:
+		web::style(d, "display", "none")
+	web::release(d)
+	web::release(p)
+	return
+=== -38ebde7c5984d8d4
+messages_click():
+	tgt i32 := web::ev_target()
+	cp i32 := web::closest(tgt, ".cb-copy")
+	if cp != 0:
+		copy_code(cp)
+		web::release(cp)
+	else:
+		tt i32 := web::closest(tgt, ".tool-toggle")
+		if tt != 0:
+			toggle_detail(tt)
+			web::release(tt)
+	if !web::same(tgt, web::el("messages")): web::release(tgt)
+	return
+=== 6399394bb2413ba0
+on_copy_reset():
+	if copy_head >= copy_q.len: return
+	h i32 := copy_q[copy_head]
+	copy_head += 1
+	if copy_head >= copy_q.len:
+		copy_q.clear()
+		copy_head = 0
+	web::text(h, "copy");
+=== 7a8733df4efc0ae2
+init():
+	web::listen(web::el("input"), "input", T_INPUT, 0)
+	web::listen(web::el("input"), "keydown", T_KEYDOWN, 0)
+	web::listen(web::el("send"), "click", T_SEND, 0)
+	web::listen(web::el("interrupt"), "click", T_INTERRUPT, 0)
+	web::listen(web::el("steer"), "click", T_STEER, 0)
+	web::listen(web::el("new-chat"), "click", T_NEW, 0)
+	web::listen(web::el("history-btn"), "click", T_HISTORY, 0)
+	web::listen(web::el("diff-toggle"), "click", T_DIFF, 0)
+	web::listen(web::el("messages"), "click", T_MSGS, 0)
+	h := web::js_global("Intl.DateTimeFormat")
+	b byte[>..] ~= []
+	b.append("[{\"$h\":")
+	format(b, h)
+	b.append("},[[],{\"year\":\"numeric\",\"month\":\"numeric\",\"day\":\"numeric\",\"hour\":\"numeric\",\"minute\":\"numeric\",\"second\":\"numeric\"}]]")
+	web::js_call(web::js_global("Reflect"), "construct", b, T_FMT);
+=== 70f4299e54c909c2
+event(tag i32, kind i32):
+	if tag == T_INPUT:
+		auto_resize()
+	else if tag == T_KEYDOWN:
+		k byte[>..] ~= []
+		web::ev_key(k)
+		if k == "Enter" && (web::ev_mods() & web::SHIFT) == 0:
+			web::ev_prevent()
+			send()
+	else if tag == T_SEND:
+		send()
+	else if tag == T_INTERRUPT:
+		interrupt_gen()
+	else if tag == T_STEER:
+		steer_gen()
+	else if tag == T_NEW:
+		new_chat()
+	else if tag == T_HISTORY:
+		show_history()
+	else if tag == T_DIFF:
+		toggle_diff()
+	else if tag == T_MSGS:
+		messages_click()
+	else if tag == T_STREAM:
+		if kind == web::EV_CHUNK:
+			on_chunk()
+		else if kind == web::EV_FETCH:
+			on_stream_end()
+	else if tag == T_UNDO:
+		if kind == web::EV_FETCH: on_undo()
+	else if tag == T_ACCEPT:
+		if kind == web::EV_FETCH: on_accept()
+	else if tag == T_STEERED:
+		if kind == web::EV_FETCH: on_steer()
+	else if tag == T_IGNORE:
+		if kind == web::EV_FETCH: web::fetch_free(web::ev_id())
+	else if tag == T_CONFIRM_UNDO:
+		if confirmed(): undo_go()
+	else if tag == T_CONFIRM_CLEAR:
+		if confirmed(): clear_history_go()
+	else if tag == T_COPY_RESET:
+		on_copy_reset()
+	else if tag == T_FMT:
+		date_fmt = web::js_handle(web::ev_id())
+		fill_times()
+	else if tag == T_TIME:
+		on_time()
+	return
+=== 526039cccd34e284
+act(verb const byte[:], arg const byte[:]):
+	if verb == "fill":
+		web::prop(web::el("input"), "value", arg)
+		focus_input()
+	else if verb == "undo":
+		undo_changes()
+	else if verb == "accept":
+		accept_changes()
+	else if verb == "diff":
+		toggle_diff()
+	else if verb == "clear_history":
+		clear_history()
+	else if verb == "new":
+		new_chat()
+	else if verb == "history":
+		show_history()
+	else if verb == "focus":
+		focus_input()
+	else if verb == "load":
+		n, ok := parse_int(arg)
+		load_chat(n)
+	else if verb == "delete":
+		n, ok := parse_int(arg)
+		delete_chat(n)
+	else if verb == "system":
+		add_msg("system", arg, "", "")
+	else if verb == "parse_diff":
+		r, err := json::parse(arg, pd)
+		if r >= 0: diff_from_tool(pd, r)
+	return

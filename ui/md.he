@@ -1,0 +1,1790 @@
+namespace md
+use json
+
+HL_COM := "<span class=\"hl-com\">"
+HL_STR := "<span class=\"hl-str\">"
+HL_NUM := "<span class=\"hl-num\">"
+HL_KW := "<span class=\"hl-kw\">"
+HL_FN := "<span class=\"hl-fn\">"
+HL_OP := "<span class=\"hl-op\">"
+SPAN_END := "</span>"
+A_1 := "<a href=\""
+A_2 := "\" target=\"_blank\" rel=\"noopener\">"
+A_END := "</a>"
+IMG_1 := "<img src=\""
+IMG_2 := "\" alt=\""
+IMG_3 := "\" loading=\"lazy\">"
+Q_GT := "\">"
+TASK_1 := "<span class=\"task\"><input type=\"checkbox\" disabled"
+TASK_CHECKED := " checked"
+TBL_1 := "<div class=\"tw\"><table><thead><tr>"
+TBL_2 := "</tr></thead><tbody>"
+TBL_3 := "</tbody></table></div>"
+ALIGN_1 := " style=\"text-align:"
+OL_START := "<ol start=\""
+FENCE_1 := "<div class=\"cb\"><div class=\"cb-bar\"><span class=\"cb-lang\">"
+FENCE_2 := "</span><button type=\"button\" class=\"cb-copy\">copy</button></div><pre><code class=\"lang-"
+FENCE_4 := "</code></pre></div>"
+D_COM_1 := "<span style=\"color:#6a9955;font-style:italic\">"
+D_KW_1 := "<span style=\"color:#569cd6\">"
+W_HEAD_1 := "<div class=\"w-head\"><span class=\"icon\">"
+W_HEAD_2 := "</span><span>"
+W_HEAD_3 := "</span></div>"
+W_OPEN_1 := "<div class=\"amni-widget "
+W_BODY := "<div class=\"w-body\">"
+W_END := "</div></div>"
+DIV_END := "</div>"
+PRE_END := "</pre>"
+IC_WEATHER := "☁"
+IC_SYSTEM := "⚙"
+IC_TIME := "⧗"
+IC_NEWS := "▤"
+IC_STOCK := "▲"
+IC_CODE := "<>"
+IC_FILE := "·"
+IC_GIT := "⎇"
+IC_DISK := "▢"
+IC_WATCH := "□"
+IC_ERROR := "!"
+IC_INFO := "i"
+IC_OTHER := "◆"
+AR_DOWN := "▼"
+DOT := " · "
+WX_1 := "<div class=\"temp\">"
+WX_2 := "°C</div><div>"
+WX_3 := "</div><div class=\"meta\">HI "
+WX_4 := "° · LO "
+WX_5 := "° · "
+WX_6 := "% humid</div>"
+SY_GRID := "<div class=\"grid\">"
+SY_CPU := "<div class=\"stat\">CPU<div class=\"v\">"
+SY_MEM := "<div class=\"stat\">MEM<div class=\"v\">"
+SY_DISK := "<div class=\"stat\">DISK<div class=\"v\">"
+SY_GPU := "<div class=\"stat\">GPU<div class=\"v\" style=\"font-size:11px\">"
+SY_PCT := "%</div></div>"
+TM_1 := "<div style=\"font-size:18px;color:var(--accent)\">"
+TM_2 := "</div><div style=\"font-size:11px;color:var(--text2)\">"
+NW_SRC := "<span class=\"src\">"
+ST_1 := "<div class=\"row\"><span><strong>"
+ST_2 := "</strong> "
+ST_3 := "</span><span class=\"chg "
+ST_4 := "%</span></div>"
+GT_1 := "<div><span class=\"branch\">⎇ "
+GT_2 := "</span> · dirty "
+GT_3 := " · ahead "
+GT_4 := " · behind "
+GT_5 := "<div class=\"commits\">"
+FL_1 := "<div style=\"font-size:11px;color:var(--text2);margin-bottom:4px\">"
+FL_2 := " lines · "
+FL_3 := "kb</div><pre style=\"margin:0;font-size:11px;max-height:160px\">"
+CD_1 := "<pre style=\"margin:0;font-size:11px;max-height:200px\">"
+FB_1 := "<pre style=\"margin:0;font-size:11px\">"
+KW_PY := "and as assert async await break class continue def del elif else except finally for from global if import in is lambda nonlocal not or pass raise return try while with yield None True False self"
+KW_JS := "await async break case catch class const continue default delete do else export extends finally for function if import in instanceof let new of return static super switch this throw try typeof var void while yield null true false undefined"
+KW_RS := "as async await break const continue crate dyn else enum extern fn for if impl in let loop match mod move mut pub ref return self static struct super trait type unsafe use where while true false"
+KW_SH := "if then else elif fi for while do done case esac function return export local source echo cd exit"
+KW_SQL := "select from where insert update delete join left right inner outer group by order having limit values set into create table drop alter"
+KW_GO := "break case chan const continue default defer else fallthrough for func go goto if import interface map package range return select struct switch type var nil true false"
+KW_DIFF := "function const let var return if else for while import from class def async await fn pub use struct impl match self true false null None undefined mut mod enum trait type where loop break continue"
+esc(out byte[>..]&, text const byte[:]):
+	for c text:
+		match c:
+			'&' => out.append("&amp;")
+			'<' => out.append("&lt;")
+			'>' => out.append("&gt;")
+			'"' => out.append("&quot;")
+			'\'' => out.append("&#39;")
+			_ => { out.push(c); }
+esc_html(out byte[>..]&, text const byte[:]):
+	n := text.len
+	i ~= 0
+	while i < n:
+		c := text[i]
+		if c == 194 && i + 1 < n && text[i + 1] == 160:
+			out.append("&nbsp;")
+			i += 2
+			continue
+		match c:
+			'&' => out.append("&amp;")
+			'<' => out.append("&lt;")
+			'>' => out.append("&gt;")
+			_ => { out.push(c); }
+		i += 1
+space_at(s const byte[:], i int) int:
+	n := s.len
+	if i < 0 || i >= n: return 0
+	c := s[i]
+	if c == 32 || (c >= 9 && c <= 13): return 1
+	if c == 194:
+		if i + 1 < n && s[i + 1] == 160: return 2
+		return 0
+	if c == 225:
+		if i + 2 < n && s[i + 1] == 154 && s[i + 2] == 128: return 3
+		return 0
+	if c == 226:
+		if i + 2 < n:
+			b := s[i + 1]
+			d := s[i + 2]
+			if b == 128 && ((d >= 128 && d <= 138) || d == 168 || d == 169 || d == 175): return 3
+			if b == 129 && d == 159: return 3
+		return 0
+	if c == 227:
+		if i + 2 < n && s[i + 1] == 128 && s[i + 2] == 128: return 3
+		return 0
+	if c == 239:
+		if i + 2 < n && s[i + 1] == 187 && s[i + 2] == 191: return 3
+		return 0
+	0
+space_before(s const byte[:], j int) int:
+	for l 1..4:
+		if j - l >= 0 && space_at(s, j - l) == l: return l
+	0
+trim_js(s const byte[:]) const byte[:]:
+	a ~= 0
+	while true:
+		w := space_at(s, a)
+		if w == 0: break
+		a += w
+	b ~= s.len
+	while b > a:
+		w := space_before(s, b)
+		if w == 0 || b - w < a: break
+		b -= w
+	s[a..b]
+is_blank(s const byte[:]) bool: trim_js(s).len == 0
+is_word(c byte) bool: (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_'
+is_digit(c byte) bool: c >= '0' && c <= '9'
+has_byte(s const byte[:], b int) bool:
+	for c s:
+		if c == b: return true
+	false
+lower_ascii(out byte[>..]&, s const byte[:]):
+	for c s:
+		if c >= 'A' && c <= 'Z':
+			out.push(c + 32)
+		else:
+			out.push(c)
+has_ls(s const byte[:]) bool:
+	i ~= 0
+	while i + 2 < s.len:
+		if s[i] == 226 && s[i + 1] == 128 && (s[i + 2] == 168 || s[i + 2] == 169): return true
+		i += 1
+	false
+starts_at(s const byte[:], i int, t const byte[:]) bool:
+	if i < 0 || i + t.len > s.len: return false
+	for k t.len:
+		if s[i + k] != t[k]: return false
+	true
+kw_table(lang const byte[:]) const byte[:]:
+	if lang == "js" || lang == "javascript" || lang == "ts" || lang == "typescript" || lang == "jsx" || lang == "tsx" || lang == "java" || lang == "kotlin": return KW_JS
+	if lang == "rs" || lang == "rust" || lang == "c" || lang == "cpp" || lang == "swift": return KW_RS
+	if lang == "sh" || lang == "bash" || lang == "shell" || lang == "zsh" || lang == "ps1" || lang == "powershell": return KW_SH
+	if lang == "sql": return KW_SQL
+	if lang == "go" || lang == "golang": return KW_GO
+	KW_PY
+kw_has(table const byte[:], w const byte[:]) bool:
+	s ~= 0
+	for i 0..table.len + 1:
+		if i == table.len || table[i] == ' ':
+			if table[s..i] == w: return true
+			s = i + 1
+	false
+hl_span(out byte[>..]&, open const byte[:], text const byte[:]):
+	out.append(open)
+	esc(out, text)
+	out.append(SPAN_END);
+wordc(c byte) bool: is_word(c) || c == '$'
+num_ch(c byte) bool: is_digit(c) || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F') || c == 'x' || c == 'X' || c == '.' || c == '_'
+hl(out byte[>..]&, src const byte[:], lang const byte[:]) bool:
+	lw byte[>..] ~= []
+	lower_ascii(lw, lang)
+	if lw == "constructor" || lw == "__proto__": return false
+	kw := kw_table(lw)
+	hash := !(lw == "json" || starts_at(lw, 0, "js") || starts_at(lw, 0, "ts") || starts_at(lw, 0, "rs") || starts_at(lw, 0, "go") || starts_at(lw, 0, "c") || starts_at(lw, 0, "java"))
+	ops := "+-*/%=<>!|^~:?"
+	n := src.len
+	i ~= 0
+	while i < n:
+		c byte := src[i]
+		if (c == '#' && hash) || (c == '/' && i + 1 < n && src[i + 1] == '/'):
+			e ~= i
+			while e < n && src[e] != 10: e += 1
+			hl_span(out, HL_COM, src[i..e])
+			i = e
+			continue
+		if c == '/' && i + 1 < n && src[i + 1] == '*':
+			e ~= n
+			k ~= i
+			while k + 1 < n:
+				if src[k] == '*' && src[k + 1] == '/':
+					e = k + 2
+					break
+				k += 1
+			hl_span(out, HL_COM, src[i..e])
+			i = e
+			continue
+		if c == '"' || c == '\'' || c == '`':
+			j ~= i + 1
+			e ~= n
+			while j < n:
+				if src[j] == '\\':
+					j += 2
+					continue
+				if src[j] == c:
+					e = j + 1
+					break
+				j += 1
+			hl_span(out, HL_STR, src[i..e])
+			i = e
+			continue
+		if is_digit(c) && (i == 0 || !wordc(src[i - 1])):
+			j ~= i
+			while j < n && num_ch(src[j]): j += 1
+			hl_span(out, HL_NUM, src[i..j])
+			i = j
+			continue
+		if wordc(c):
+			j ~= i
+			while j < n && wordc(src[j]): j += 1
+			k ~= j
+			while k < n && src[k] == ' ': k += 1
+			w := src[i..j]
+			if kw_has(kw, w):
+				hl_span(out, HL_KW, w)
+			else if k < n && src[k] == '(':
+				hl_span(out, HL_FN, w)
+			else:
+				esc(out, w)
+			i = j
+			continue
+		isop ~= false
+		for o ops:
+			if c == o: isop = true
+		if isop:
+			hl_span(out, HL_OP, src[i..i + 1])
+		else:
+			esc(out, src[i..i + 1])
+		i += 1
+	true
+code_span_at(s const byte[:], p int) bool, int, int, int:
+	n := s.len
+	k ~= 0
+	while p + k < n && s[p + k] == '`': k += 1
+	m ~= k
+	while m >= 1:
+		q := p + m
+		e ~= q + 1
+		while e + m <= n:
+			if s[e - 1] != '`':
+				all ~= true
+				for t m:
+					if s[e + t] != '`': all = false
+				if all && (e + m >= n || s[e + m] != '`'): return true, q, e, e + m
+			e += 1
+		m -= 1
+	return false, 0, 0, 0
+dec_val(s const byte[:], a int, b int) int:
+	v ~= 0
+	for k a..b:
+		if v < 1000000000000: v = v * 10 + ((s[k] as int) - 48)
+	v
+stash_code(rest byte[>..]&, s const byte[:], pool byte[>..]&, ends int[>..]&):
+	n := s.len
+	p ~= 0
+	while p < n:
+		if s[p] == '`':
+			found, q, e, en := code_span_at(s, p)
+			if found:
+				cnt := ends.len
+				pool.append(s[q..e])
+				ends.push(pool.len)
+				rest.push(238)
+				rest.push(128)
+				rest.push(160)
+				format(rest, cnt)
+				rest.push(238)
+				rest.push(128)
+				rest.push(161)
+				p = en
+				continue
+		rest.push(s[p])
+		p += 1
+unstash(out byte[>..]&, s const byte[:], pool const byte[:], ends const int[:]):
+	n := s.len
+	i ~= 0
+	while i < n:
+		if s[i] == 238 && i + 2 < n && s[i + 1] == 128 && s[i + 2] == 160:
+			j ~= i + 3
+			while j < n && is_digit(s[j]): j += 1
+			if j > i + 3 && j + 2 < n && s[j] == 238 && s[j + 1] == 128 && s[j + 2] == 161:
+				k := dec_val(s, i + 3, j)
+				out.append("<code>")
+				if k < ends.len:
+					st ~= 0
+					if k > 0: st = ends[k - 1]
+					esc(out, pool[st..ends[k]])
+				out.append("</code>")
+				i = j + 3
+				continue
+		out.push(s[i])
+		i += 1
+bracket_at(s const byte[:], a int) bool, int, int, int, int:
+	n := s.len
+	b ~= a
+	while b < n && s[b] != ']': b += 1
+	if b + 1 >= n || s[b + 1] != '(': return false, 0, 0, 0, 0
+	t ~= b + 2
+	while true:
+		w := space_at(s, t)
+		if w == 0: break
+		t += w
+	u ~= t
+	while u < n && s[u] != ')' && space_at(s, u) == 0: u += 1
+	if u == t: return false, 0, 0, 0, 0
+	x ~= u
+	while x < n && s[x] != ')': x += 1
+	if x >= n: return false, 0, 0, 0, 0
+	return true, b, t, u, x + 1
+brackets(out byte[>..]&, s const byte[:], image bool):
+	n := s.len
+	p ~= 0
+	while p < n:
+		a ~= -1
+		if image:
+			if s[p] == '!' && p + 1 < n && s[p + 1] == '[': a = p + 2
+		else if s[p] == '[':
+			a = p + 1
+		if a >= 0:
+			ok, b, t, u, x := bracket_at(s, a)
+			if ok:
+				url := s[t..u]
+				label := s[a..b]
+				good ~= false
+				if image:
+					good = starts_at(s, t, "http:") || starts_at(s, t, "https:") || starts_at(s, t, "data:image/")
+				else:
+					good = starts_at(s, t, "http:") || starts_at(s, t, "https:") || starts_at(s, t, "mailto:") || starts_at(s, t, "#") || starts_at(s, t, "/")
+				if good:
+					if image:
+						out.append(IMG_1)
+						out.append(url)
+						out.append(IMG_2)
+						out.append(label)
+						out.append(IMG_3)
+					else:
+						out.append(A_1)
+						out.append(url)
+						out.append(A_2)
+						if label.len > 0:
+							out.append(label)
+						else:
+							out.append(url)
+						out.append(A_END)
+				else:
+					out.append(s[p..x])
+				p = x
+				continue
+		out.push(s[p])
+		p += 1
+web_end(s const byte[:], u int) int:
+	n := s.len
+	sl ~= 0
+	if starts_at(s, u, "http://"):
+		sl = 7
+	else if starts_at(s, u, "https://"):
+		sl = 8
+	else if starts_at(s, u, "www."):
+		sl = 4
+	if sl == 0: return -1
+	r ~= u + sl
+	while r < n && space_at(s, r) == 0 && s[r] != '<' && s[r] != ')': r += 1
+	k ~= r
+	while k > u + sl:
+		c := s[k - 1]
+		if c != '.' && c != ',' && c != ';' && c != ':' && c != '!' && c != '?' && c != '\'' && c != '"': return k
+		k -= 1
+	-1
+autolink(out byte[>..]&, s const byte[:]):
+	n := s.len
+	i ~= 0
+	while i < n:
+		pl ~= -1
+		u ~= -1
+		e ~= -1
+		if i == 0:
+			e0 := web_end(s, 0)
+			if e0 >= 0:
+				pl = 0
+				u = 0
+				e = e0
+		if pl < 0:
+			w ~= space_at(s, i)
+			if w == 0 && s[i] == '(': w = 1
+			if w > 0:
+				e1 := web_end(s, i + w)
+				if e1 >= 0:
+					pl = w
+					u = i + w
+					e = e1
+		if pl >= 0:
+			out.append(s[i..i + pl])
+			out.append(A_1)
+			if starts_at(s, u, "www."): out.append("https://")
+			out.append(s[u..e])
+			out.append(A_2)
+			out.append(s[u..e])
+			out.append(A_END)
+			i = e
+			continue
+		out.push(s[i])
+		i += 1
+emph_def(kind int) const byte[:], const byte[:], const byte[:]:
+	if kind == 0: return "***", "<strong><em>", "</em></strong>"
+	if kind == 1: return "**", "<strong>", "</strong>"
+	if kind == 2: return "__", "<strong>", "</strong>"
+	if kind == 3: return "*", "<em>", "</em>"
+	if kind == 4: return "_", "<em>", "</em>"
+	return "~~", "<s>", "</s>"
+emph(out byte[>..]&, s const byte[:], kind int):
+	delim, op, cl := emph_def(kind)
+	n := s.len
+	d := delim.len
+	plain := kind == 0 || kind == 1 || kind == 5
+	restricted := kind == 3 || kind == 4
+	stopper ~= 0
+	if kind == 3: stopper = 42
+	if kind == 4: stopper = 95
+	frm ~= 0
+	p ~= 0
+	while p < n:
+		if starts_at(s, p, delim):
+			may ~= plain
+			if !plain:
+				if p == 0:
+					may = true
+				else if p > frm && !is_word(s[p - 1]) && !(kind == 3 && s[p - 1] == '*'):
+					may = true
+			q := p + d
+			if may && q < n && space_at(s, q) == 0:
+				e ~= q + 1
+				found ~= false
+				while e + d <= n:
+					if starts_at(s, e, delim) && space_before(s, e) == 0 && (plain || e + d == n || !is_word(s[e + d])):
+						found = true
+						break
+					if restricted && (s[e - 1] == stopper || s[e - 1] == 10): break
+					e += 1
+				if found:
+					out.append(op)
+					out.append(s[q..e])
+					out.append(cl)
+					p = e + d
+					frm = p
+					continue
+		out.push(s[p])
+		p += 1
+line_end_at(s const byte[:], j int) bool:
+	n := s.len
+	if j >= n: return true
+	c := s[j]
+	if c == 10 || c == 13: return true
+	if c == 226 && j + 2 < n && s[j + 1] == 128 && (s[j + 2] == 168 || s[j + 2] == 169): return true
+	false
+line_breaks(out byte[>..]&, s const byte[:]):
+	n := s.len
+	i ~= 0
+	while i < n:
+		if s[i] == ' ' || s[i] == 9:
+			j ~= i
+			while j < n && (s[j] == ' ' || s[j] == 9): j += 1
+			if j - i >= 2 && line_end_at(s, j):
+				out.append("<br>")
+			else:
+				out.append(s[i..j])
+			i = j
+		else:
+			out.push(s[i])
+			i += 1
+task_text(out byte[>..]&, text const byte[:]):
+	n := text.len
+	if n >= 4 && text[0] == '[' && (text[1] == ' ' || text[1] == 'x' || text[1] == 'X') && text[2] == ']' && (text[3] == ' ' || text[3] == 9):
+		k ~= 3
+		while k < n && (text[k] == ' ' || text[k] == 9): k += 1
+		out.append(TASK_1)
+		if text[1] != ' ': out.append(TASK_CHECKED)
+		out.append(">")
+		inline_md(out, text[k..])
+		out.append("</span>")
+	else:
+		inline_md(out, text)
+inline(out byte[>..]&, text const byte[:]):
+	pool byte[>..] ~= []
+	ends int[>..] ~= []
+	a byte[>..] ~= []
+	b byte[>..] ~= []
+	stash_code(a, text, pool, ends)
+	esc(b, a)
+	a.clear()
+	brackets(a, b, true)
+	b.clear()
+	brackets(b, a, false)
+	a.clear()
+	autolink(a, b)
+	b.clear()
+	emph(b, a, 0)
+	a.clear()
+	emph(a, b, 1)
+	b.clear()
+	emph(b, a, 2)
+	a.clear()
+	emph(a, b, 3)
+	b.clear()
+	emph(b, a, 4)
+	a.clear()
+	emph(a, b, 5)
+	b.clear()
+	line_breaks(b, a)
+	unstash(out, b, pool, ends);
+inline_md(out byte[>..]&, text const byte[:]):
+	inline(out, text);
+struct Item { ind int, ord int, num int, from int }
+line(text const byte[:], lb const int[:], i int) const byte[:]: text[lb[2 * i]..lb[2 * i + 1]]
+split_into(text const byte[:], lb int[>..]&):
+	s ~= 0
+	for i text.len:
+		if text[i] == 10:
+			lb.push(s)
+			lb.push(i)
+			s = i + 1
+	lb.push(s)
+	lb.push(text.len);
+split_lines(text const byte[:], lb int[>..]&):
+	lb.clear()
+	split_into(text, lb);
+normalize(out byte[>..]&, s const byte[:]):
+	n := s.len
+	i ~= 0
+	while i < n:
+		if s[i] == 13:
+			out.push(10)
+			if i + 1 < n && s[i + 1] == 10: i += 1
+		else:
+			out.push(s[i])
+		i += 1
+skip_ws(l const byte[:], i0 int) int:
+	i ~= i0
+	while i < l.len && (l[i] == ' ' || l[i] == 9): i += 1
+	i
+hr_line(l const byte[:]) bool:
+	n := l.len
+	i ~= 0
+	while i < 3 && i < n && l[i] == ' ': i += 1
+	if i >= n: return false
+	m := l[i]
+	if m != '-' && m != '*' && m != '_': return false
+	count ~= 1
+	for j i + 1..n:
+		c := l[j]
+		if c == m:
+			count += 1
+		else if c != ' ' && c != 9:
+			return false
+	count >= 3
+head_of(l const byte[:]) int, int, int:
+	if has_ls(l): return 0, 0, 0
+	n := l.len
+	i ~= 0
+	while i < 3 && i < n && l[i] == ' ': i += 1
+	h ~= i
+	while h < n && l[h] == '#': h += 1
+	cnt := h - i
+	if cnt < 1 || cnt > 6: return 0, 0, 0
+	if h >= n || (l[h] != ' ' && l[h] != 9): return 0, 0, 0
+	s := skip_ws(l, h)
+	e ~= n
+	while e > s && (l[e - 1] == ' ' || l[e - 1] == 9): e -= 1
+	while e > s && l[e - 1] == '#': e -= 1
+	while e > s && (l[e - 1] == ' ' || l[e - 1] == 9): e -= 1
+	return cnt, s, e
+quote_of(l const byte[:]) bool, int:
+	if has_ls(l): return false, 0
+	n := l.len
+	i ~= 0
+	while i < 3 && i < n && l[i] == ' ': i += 1
+	if i >= n || l[i] != '>': return false, 0
+	i += 1
+	if i < n && (l[i] == ' ' || l[i] == 9): i += 1
+	return true, i
+li_of(l const byte[:]) bool, int, int, int, int:
+	if has_ls(l): return false, 0, 0, 0, 0
+	n := l.len
+	i ~= 0
+	w ~= 0
+	while i < n && (l[i] == ' ' || l[i] == 9):
+		w += if l[i] == ' ' { 1 } else { 2 }
+		i += 1
+	ord ~= 0
+	num ~= 1
+	m ~= i
+	found ~= false
+	if i < n && (l[i] == '-' || l[i] == '*' || l[i] == '+'):
+		m = i + 1
+		found = true
+	else if i + 2 < n && l[i] == 226 && l[i + 1] == 128 && l[i + 2] == 162:
+		m = i + 3
+		found = true
+	else:
+		j ~= i
+		while j < n && is_digit(l[j]): j += 1
+		cnt := j - i
+		if cnt >= 1 && cnt <= 9 && j < n && (l[j] == '.' || l[j] == ')'):
+			v ~= 0
+			for q i..j: v = v * 10 + ((l[q] as int) - 48)
+			ord = 1
+			num = if v == 0 { 1 } else { v }
+			m = j + 1
+			found = true
+	if !found: return false, 0, 0, 0, 0
+	if m >= n || (l[m] != ' ' && l[m] != 9): return false, 0, 0, 0, 0
+	st := skip_ws(l, m)
+	return true, w, ord, num, st
+code_of(l const byte[:]) bool, int:
+	if has_ls(l): return false, 0
+	if starts_at(l, 0, "    "): return true, 4
+	if starts_at(l, 0, "\t"): return true, 1
+	return false, 0
+is_block(l const byte[:]) bool:
+	if hr_line(l): return true
+	h, hs, he := head_of(l)
+	if h > 0: return true
+	q, qs := quote_of(l)
+	if q: return true
+	lf, a, b, c, d := li_of(l)
+	lf
+dr_col(l const byte[:], i0 int) int:
+	n := l.len
+	i ~= skip_ws(l, i0)
+	if i < n && l[i] == ':': i += 1
+	h ~= i
+	while h < n && l[h] == '-': h += 1
+	if h == i: return -1
+	i = h
+	if i < n && l[i] == ':': i += 1
+	skip_ws(l, i)
+delim_row(l const byte[:]) bool:
+	n := l.len
+	if !has_byte(l, '|'): return false
+	i ~= skip_ws(l, 0)
+	if i < n && l[i] == '|': i += 1
+	while true:
+		i = dr_col(l, i)
+		if i < 0: return false
+		if i >= n: return true
+		if l[i] != '|': return false
+		i += 1
+		i = skip_ws(l, i)
+		if i >= n: return true
+	false
+table_start(text const byte[:], lb const int[:], i int) bool:
+	if i + 1 >= lb.len / 2: return false
+	if !has_byte(line(text, lb, i), '|'): return false
+	delim_row(line(text, lb, i + 1))
+cells(row const byte[:], pool byte[>..]&, ends int[>..]&):
+	pool.clear()
+	ends.clear()
+	t := trim_js(row)
+	lead := t.len > 0 && t[0] == '|'
+	trail := t.len > 1 && t[t.len - 1] == '|' && t[t.len - 2] != '\\'
+	raw byte[>..] ~= []
+	rends int[>..] ~= []
+	tick ~= false
+	i ~= 0
+	while i < t.len:
+		c := t[i]
+		if c == '\\' && i + 1 < t.len && t[i + 1] == '|':
+			raw.push('|')
+			i += 2
+			continue
+		if c == '`':
+			tick = !tick
+			raw.push(c)
+		else if c == '|' && !tick:
+			rends.push(raw.len)
+		else:
+			raw.push(c)
+		i += 1
+	rends.push(raw.len)
+	first ~= 0
+	if lead: first = 1
+	last ~= rends.len
+	if trail: last = rends.len - 1
+	k ~= first
+	while k < last:
+		st ~= 0
+		if k > 0: st = rends[k - 1]
+		pool.append(trim_js(raw[st..rends[k]]))
+		ends.push(pool.len)
+		k += 1
+align_of(c const byte[:]) int:
+	n := c.len
+	i ~= 0
+	lc := n > 0 && c[0] == ':'
+	if lc: i = 1
+	h ~= i
+	while h < n && c[h] == '-': h += 1
+	if h == i: return 0
+	rc := h < n && c[h] == ':'
+	e ~= h
+	if rc: e = h + 1
+	if e != n: return 0
+	if lc && rc: return 2
+	if lc: return 1
+	if rc: return 3
+	0
+cell_at(pool const byte[:], ends const int[:], k int) const byte[:]:
+	s ~= 0
+	if k > 0: s = ends[k - 1]
+	pool[s..ends[k]]
+write_cell(out byte[>..]&, tag const byte[:], al int, text const byte[:]):
+	out.append("<")
+	out.append(tag)
+	if al != 0:
+		out.append(ALIGN_1)
+		if al == 1:
+			out.append("left")
+		else if al == 2:
+			out.append("center")
+		else:
+			out.append("right")
+		out.push('"')
+	out.append(">")
+	inline_md(out, text)
+	out.append("</")
+	out.append(tag)
+	out.append(">");
+table(out byte[>..]&, text const byte[:], lb const int[:], i int) bool, int:
+	hp byte[>..] ~= []
+	he int[>..] ~= []
+	cells(line(text, lb, i), hp, he)
+	if he.len == 0: return false, 0
+	dp byte[>..] ~= []
+	de int[>..] ~= []
+	cells(line(text, lb, i + 1), dp, de)
+	nl := lb.len / 2
+	out.append(TBL_1)
+	for k he.len:
+		al ~= 0
+		if k < de.len: al = align_of(cell_at(dp, de, k))
+		write_cell(out, "th", al, cell_at(hp, he, k))
+	out.append(TBL_2)
+	j ~= i + 2
+	while j < nl:
+		lj := line(text, lb, j)
+		if is_blank(lj) || !has_byte(lj, '|') || delim_row(lj): break
+		rp byte[>..] ~= []
+		re int[>..] ~= []
+		cells(lj, rp, re)
+		out.append("<tr>")
+		for k he.len:
+			al ~= 0
+			if k < de.len: al = align_of(cell_at(dp, de, k))
+			cell const byte[:] ~= ""
+			if k < re.len: cell = cell_at(rp, re, k)
+			write_cell(out, "td", al, cell)
+		out.append("</tr>")
+		j += 1
+	out.append(TBL_3)
+	return true, j
+gather(text const byte[:], lb const int[:], i0 int, items Item[>..]&, pool byte[>..]&) int:
+	i ~= i0
+	nl := lb.len / 2
+	while i < nl:
+		l := line(text, lb, i)
+		ok, ind, ord, num, st := li_of(l)
+		if ok:
+			items.push(Item{ind: ind, ord: ord, num: num, from: pool.len})
+			pool.append(l[st..])
+			i += 1
+			continue
+		if is_blank(l):
+			j ~= i + 1
+			while j < nl && is_blank(line(text, lb, j)): j += 1
+			if j < nl:
+				lj, a, b, c, d := li_of(line(text, lb, j))
+				if lj:
+					i = j
+					continue
+			break
+		if items.len > 0:
+			k ~= 0
+			while k < l.len && (l[k] == ' ' || l[k] == 9): k += 1
+			if k >= 2 && k < l.len && space_at(l, k) == 0:
+				pool.push(10)
+				pool.append(trim_js(l))
+				i += 1
+				continue
+		break
+	i
+var ra byte[>..<]
+var fs int[>..<]
+var rt byte[>..]
+var rc byte[>..]
+rl_open(items const Item[:], p int, ind int):
+	fs.push(ind)
+	fs.push(items[p].ord)
+	fs.push(ra.len)
+	if items[p].ord == 1:
+		if items[p].num > 1:
+			rt.clear()
+			format(rt, items[p].num)
+			ra.append(OL_START)
+			ra.append(rt)
+			ra.append(Q_GT)
+		else:
+			ra.append("<ol>")
+	else:
+		ra.append("<ul>");
+rl_close(fo int, fst int):
+	if fo == 1:
+		ra.append("</ol>")
+	else:
+		ra.append("</ul>")
+	t := fs.len - 3
+	if t == 0:
+		fs.pop_n(3)
+		return
+	rc.clear()
+	for q fst..ra.len:
+		v := ra[q]
+		rc.push(v)
+	ra.pop_n(ra.len - fst)
+	fs.pop_n(3)
+	ps := fs[t - 1]
+	chk := "</li>"
+	ok ~= ra.len - ps >= 5
+	if ok:
+		for q 5:
+			if ra[ra.len - 5 + q] != chk[q]: ok = false
+	if ok:
+		ra.pop_n(5)
+		pe := ra.len
+		k ~= 0
+		while k < rc.len:
+			c := rc[k]
+			if c == '$' && k + 1 < rc.len:
+				d := rc[k + 1]
+				if d == '$':
+					ra.push('$')
+					k += 2
+					continue
+				if d == '&':
+					ra.append("</li>")
+					k += 2
+					continue
+				if d == 39:
+					k += 2
+					continue
+				if d == '`':
+					for x ps..pe:
+						v := ra[x]
+						ra.push(v)
+					k += 2
+					continue
+			ra.push(c)
+			k += 1
+		ra.append("</li>")
+	else:
+		ra.append("<li>")
+		ra.append(rc)
+		ra.append("</li>");
+render_list(html byte[>..]&, items const Item[:], pool const byte[:], pos int, ind int) int:
+	ra.clear()
+	fs.clear()
+	p ~= pos
+	rl_open(items, p, ind)
+	while fs.len > 0:
+		t := fs.len - 3
+		fi := fs[t]
+		fo := fs[t + 1]
+		fst := fs[t + 2]
+		if p < items.len && items[p].ind >= fi:
+			if items[p].ind > fi:
+				rl_open(items, p, items[p].ind)
+			else if items[p].ord != fo:
+				rl_close(fo, fst)
+			else:
+				a := items[p].from
+				b ~= pool.len
+				if p + 1 < items.len: b = items[p + 1].from
+				rt.clear()
+				task_text(rt, pool[a..b])
+				ra.append("<li>")
+				ra.append(rt)
+				ra.append("</li>")
+				p += 1
+		else:
+			rl_close(fo, fst)
+	html.append(ra[0..ra.len])
+	p
+var ja byte[>..]
+var jb byte[>..]
+var lbar int[>..]
+list_rule(out byte[>..]&, text const byte[:], lb const int[:], i int) int:
+	items Item[>..] ~= []
+	pool byte[>..] ~= []
+	j := gather(text, lb, i, items, pool)
+	pos ~= 0
+	while pos < items.len:
+		np := render_list(out, items, pool, pos, items[pos].ind)
+		if np > pos:
+			pos = np
+		else:
+			pos += 1
+	j
+code_rule(out byte[>..]&, text const byte[:], lb const int[:], i int) int:
+	nl := lb.len / 2
+	out.append("<pre><code>")
+	j ~= i
+	first ~= true
+	while j < nl:
+		lj := line(text, lb, j)
+		if is_blank(lj):
+			k ~= j
+			while k < nl && is_blank(line(text, lb, k)): k += 1
+			if k >= nl: break
+			cf, cs := code_of(line(text, lb, k))
+			if !cf: break
+			if !first: out.push(10)
+			first = false
+			j = k
+		else:
+			cf, cs := code_of(lj)
+			if !cf: break
+			if !first: out.push(10)
+			first = false
+			esc(out, lj[cs..])
+			j += 1
+	out.append("</code></pre>")
+	j
+para(out byte[>..]&, text const byte[:], lb const int[:], i int) int:
+	nl := lb.len / 2
+	j ~= i
+	while j < nl:
+		lj := line(text, lb, j)
+		if is_blank(lj) || is_block(lj) || table_start(text, lb, j): break
+		j += 1
+	if j == i: j = i + 1
+	jt byte[>..] ~= []
+	for k i..j:
+		if k > i: jt.push(10)
+		jt.append(line(text, lb, k))
+	sc byte[>..] ~= []
+	inline_md(sc, jt)
+	out.append("<p>")
+	k ~= 0
+	while k < sc.len:
+		if sc[k] == 10:
+			out.push(' ')
+			while k < sc.len && sc[k] == 10: k += 1
+		else:
+			out.push(sc[k])
+			k += 1
+	out.append("</p>")
+	j
+recursive blocks_in(out byte[>..]&, src const byte[:]):
+	base := ja.len
+	normalize(ja, src)
+	text := ja[base..]
+	lbase := lbar.len
+	split_into(text, lbar)
+	lb := lbar[lbase..]
+	nl := lb.len / 2
+	i ~= 0
+	while i < nl:
+		l := line(text, lb, i)
+		if is_blank(l):
+			i += 1
+			continue
+		if hr_line(l):
+			out.append("<hr>")
+			i += 1
+			continue
+		h, hs, he := head_of(l)
+		if h > 0:
+			n := min(h, 4)
+			format(out, "<h", n, ">")
+			inline_md(out, l[hs..he])
+			format(out, "</h", n, ">")
+			i += 1
+			continue
+		qf, qs := quote_of(l)
+		if qf:
+			jst := jb.len
+			j ~= i
+			cnt ~= 0
+			while j < nl:
+				lj := line(text, lb, j)
+				if is_blank(lj): break
+				q2, qs2 := quote_of(lj)
+				if !(q2 || (cnt > 0 && !is_block(lj))): break
+				if cnt > 0: jb.push(10)
+				if q2:
+					jb.append(lj[qs2..])
+				else:
+					jb.append(trim_js(lj))
+				cnt += 1
+				j += 1
+			out.append("<blockquote>")
+			blocks_in(out, jb[jst..])
+			out.append("</blockquote>")
+			i = j
+			continue
+		if table_start(text, lb, i):
+			ok, ni := table(out, text, lb, i)
+			if ok:
+				i = ni
+				continue
+		lf, a1, b1, c1, d1 := li_of(l)
+		if lf:
+			i = list_rule(out, text, lb, i)
+			continue
+		cf, cs := code_of(l)
+		if cf:
+			i = code_rule(out, text, lb, i)
+			continue
+		i = para(out, text, lb, i)
+blocks(out byte[>..]&, src const byte[:]):
+	ja.clear()
+	jb.clear()
+	lbar.clear()
+	blocks_in(out, src);
+fence(out byte[>..]&, lang const byte[:], src const byte[:]) bool:
+	lw byte[>..] ~= []
+	lower_ascii(lw, lang)
+	out.append(FENCE_1)
+	if lw.len == 0:
+		out.append("text")
+	else:
+		esc(out, lw)
+	out.append(FENCE_2)
+	if lw.len == 0:
+		out.append("txt")
+	else:
+		esc(out, lw)
+	out.append(Q_GT)
+	ok := hl(out, src, lw)
+	out.append(FENCE_4)
+	ok
+fence_at(s const byte[:], a int, pool byte[>..]&, ends int[>..]&) bool, int:
+	n := s.len
+	i ~= a
+	k ~= 0
+	while i < n && k < 3 && (s[i] == ' ' || s[i] == 9):
+		i += 1
+		k += 1
+	if i + 3 > n: return false, 0
+	m := s[i]
+	if (m != '`' && m != '~') || s[i + 1] != m || s[i + 2] != m: return false, 0
+	j ~= i + 3
+	while j < n && s[j] != 10: j += 1
+	if j >= n: return false, 0
+	bs := j + 1
+	info := s[i + 3..j]
+	e ~= bs
+	found ~= false
+	me ~= n
+	while e < n:
+		if s[e] == 10:
+			p ~= e + 1
+			z ~= 0
+			while p < n && z < 3 && (s[p] == ' ' || s[p] == 9):
+				p += 1
+				z += 1
+			g ~= 0
+			while p + 3 <= n && s[p] == m && s[p + 1] == m && s[p + 2] == m:
+				p += 3
+				g += 1
+			if g >= 1:
+				while p < n && (s[p] == ' ' || s[p] == 9): p += 1
+				if p >= n || s[p] == 10:
+					found = true
+					me = p
+					break
+		e += 1
+	be ~= n
+	if found: be = e
+	t := trim_js(info)
+	q ~= 0
+	while q < t.len && space_at(t, q) == 0 && t[q] != ',': q += 1
+	pool.append(t[..q])
+	ends.push(pool.len)
+	pool.append(s[bs..be])
+	ends.push(pool.len)
+	return true, me
+extract_fences(rest byte[>..]&, s const byte[:], pool byte[>..]&, ends int[>..]&):
+	n := s.len
+	i ~= 0
+	while i < n:
+		if i == 0:
+			ok, me := fence_at(s, 0, pool, ends)
+			if ok:
+				blk := ends.len / 2 - 1
+				rest.push(238)
+				rest.push(128)
+				rest.push(176)
+				format(rest, blk)
+				rest.push(238)
+				rest.push(128)
+				rest.push(177)
+				i = me
+				continue
+		if s[i] == 10:
+			ok, me := fence_at(s, i + 1, pool, ends)
+			if ok:
+				rest.push(10)
+				blk := ends.len / 2 - 1
+				rest.push(238)
+				rest.push(128)
+				rest.push(176)
+				format(rest, blk)
+				rest.push(238)
+				rest.push(128)
+				rest.push(177)
+				i = me
+				continue
+		rest.push(s[i])
+		i += 1
+ph_end(h const byte[:], i int) int, int:
+	n := h.len
+	if i < 0 || i + 2 >= n: return -1, 0
+	if h[i] != 238 || h[i + 1] != 128 || h[i + 2] != 176: return -1, 0
+	j ~= i + 3
+	while j < n && is_digit(h[j]): j += 1
+	if j == i + 3: return -1, 0
+	if j + 2 >= n: return -1, 0
+	if h[j] != 238 || h[j + 1] != 128 || h[j + 2] != 177: return -1, 0
+	return j + 3, dec_val(h, i + 3, j)
+restore_fences(out byte[>..]&, h const byte[:], pool const byte[:], ends const int[:]) bool:
+	n := h.len
+	ok ~= true
+	i ~= 0
+	while i < n:
+		st ~= i
+		if starts_at(h, i, "<p>"): st = i + 3
+		e ~= 0
+		k ~= 0
+		e0, k0 := ph_end(h, st)
+		e = e0
+		k = k0
+		if e >= 0:
+			if starts_at(h, e, "</p>"): e += 4
+			if k < ends.len / 2:
+				ls ~= 0
+				if k > 0: ls = ends[2 * k - 1]
+				le := ends[2 * k]
+				se := ends[2 * k + 1]
+				r := fence(out, pool[ls..le], pool[le..se])
+				if !r: ok = false
+			i = e
+			continue
+		out.push(h[i])
+		i += 1
+	ok
+md(out byte[>..]&, text const byte[:]) bool:
+	a byte[>..] ~= []
+	b byte[>..] ~= []
+	c byte[>..] ~= []
+	pool byte[>..] ~= []
+	ends int[>..] ~= []
+	normalize(a, text)
+	extract_fences(b, a, pool, ends)
+	blocks(c, b)
+	restore_fences(out, c, pool, ends)
+render(out byte[>..]&, text const byte[:]):
+	start := out.len
+	ok := md(out, text)
+	if !ok:
+		out.pop_n(out.len - start)
+		out.append("<p>")
+		esc(out, text)
+		out.append("</p>")
+utf8_len(c byte) int:
+	if c >= 240: return 4
+	if c >= 224: return 3
+	if c >= 192: return 2
+	1
+diff_line(out byte[>..]&, text const byte[:]):
+	e byte[>..] ~= []
+	esc_html(e, text)
+	f byte[>..] ~= []
+	n := e.len
+	p ~= 0
+	while p < n:
+		st ~= -1
+		if p + 1 < n && e[p] == '/' && e[p + 1] == '/':
+			st = p + 2
+		else if e[p] == '#' && p + 1 < n && e[p + 1] != '{':
+			st = p + 1 + utf8_len(e[p + 1])
+		if st >= 0:
+			q ~= min(st, n)
+			while q < n && !line_end_at(e, q): q += 1
+			f.append(D_COM_1)
+			f.append(e[p..q])
+			f.append(SPAN_END)
+			p = q
+			continue
+		f.push(e[p])
+		p += 1
+	g byte[>..] ~= []
+	m := f.len
+	i ~= 0
+	while i < m:
+		if is_word(f[i]):
+			j ~= i
+			while j < m && is_word(f[j]): j += 1
+			w := f[i..j]
+			if kw_has(KW_DIFF, w):
+				g.append(D_KW_1)
+				g.append(w)
+				g.append(SPAN_END)
+			else:
+				g.append(w)
+			i = j
+		else:
+			g.push(f[i])
+			i += 1
+	if g.len == 0:
+		out.append("&nbsp;")
+	else:
+		out.append(g)
+num_str(out byte[>..]&, v real):
+	if v != v:
+		out.append("NaN")
+		return
+	if v == 0.0:
+		out.append("0")
+		return
+	x ~= v
+	if x < 0.0:
+		out.push('-')
+		x = -x
+	if x - x != 0.0:
+		out.append("Infinity")
+		return
+	dg byte[>..] ~= []
+	e := json::digits_of(x, dg)
+	k := dg.len
+	n := e + 1
+	if k <= n && n <= 21:
+		out.append(dg)
+		for q n - k: out.push('0')
+	else if n > 0 && n <= 21:
+		out.append(dg[..n])
+		out.push('.')
+		out.append(dg[n..])
+	else if n > -6 && n <= 0:
+		out.append("0.")
+		for q 0 - n: out.push('0')
+		out.append(dg)
+	else:
+		out.push(dg[0])
+		if k > 1:
+			out.push('.')
+			out.append(dg[1..])
+		out.push('e')
+		if n - 1 >= 0:
+			out.push('+')
+		else:
+			out.push('-')
+		format(out, abs(n - 1))
+to_fixed(out byte[>..]&, v real, f int):
+	if v != v:
+		out.append("NaN")
+		return
+	if v - v != 0.0 || v >= 1.0e21 || v <= -1.0e21:
+		num_str(out, v)
+		return
+	x ~= v
+	if x < 0.0:
+		out.push('-')
+		x = -x
+	format_flt(out, x, f, true)
+fmt_size(out byte[>..]&, bytes real):
+	if bytes >= 1073741824.0:
+		to_fixed(out, bytes / 1073741824.0, 1)
+		out.append(" GB")
+	else if bytes >= 1048576.0:
+		to_fixed(out, bytes / 1048576.0, 0)
+		out.append(" MB")
+	else if bytes >= 1024.0:
+		to_fixed(out, bytes / 1024.0, 0)
+		out.append(" KB")
+	else:
+		num_str(out, bytes)
+		out.append(" B")
+inf_val() real:
+	x := 1.0e308
+	x * 10.0
+nan_val() real:
+	i := inf_val()
+	i - i
+digit_val(c byte) int:
+	if c >= '0' && c <= '9': return (c as int) - 48
+	if c >= 'a' && c <= 'f': return (c as int) - 87
+	if c >= 'A' && c <= 'F': return (c as int) - 55
+	-1
+str_to_num(s const byte[:]) real:
+	t := trim_js(s)
+	n := t.len
+	if n == 0: return 0.0
+	if t == "Infinity" || t == "+Infinity": return inf_val()
+	if t == "-Infinity": return -inf_val()
+	if n > 2 && t[0] == '0':
+		c := t[1]
+		base ~= 0
+		if c == 'x' || c == 'X': base = 16
+		if c == 'o' || c == 'O': base = 8
+		if c == 'b' || c == 'B': base = 2
+		if base > 0:
+			v ~= 0.0
+			for k 2..n:
+				d := digit_val(t[k])
+				if d < 0 || d >= base: return nan_val()
+				v = v * base + d
+			return v
+	i ~= 0
+	if t[0] == '+' || t[0] == '-': i += 1
+	a := i
+	while i < n && is_digit(t[i]): i += 1
+	nd := i - a
+	fd ~= 0
+	dot ~= false
+	if i < n && t[i] == '.':
+		dot = true
+		i += 1
+		f0 := i
+		while i < n && is_digit(t[i]): i += 1
+		fd = i - f0
+	if nd == 0 && fd == 0: return nan_val()
+	if i < n && (t[i] == 'e' || t[i] == 'E'):
+		i += 1
+		if i < n && (t[i] == '+' || t[i] == '-'): i += 1
+		e0 := i
+		while i < n && is_digit(t[i]): i += 1
+		if i == e0: return nan_val()
+	if i != n: return nan_val()
+	v, ok := parse_flt(t)
+	v
+js_round(v real) real:
+	if v != v || v >= 4503599627370496.0 || v <= -4503599627370496.0: return v
+	fi := v as int
+	f real ~= fi
+	if f > v: f -= 1.0
+	if v - f >= 0.5: return f + 1.0
+	f
+truthy(d json::Doc&, n int) bool:
+	if n < 0: return false
+	k := json::kind(d, n)
+	if k == json::K_NULL: return false
+	if k == json::K_BOOL:
+		v, ok := json::as_bool(d, n)
+		return v
+	if k == json::K_INT || k == json::K_NUM:
+		v, ok := json::as_f64(d, n)
+		return v != 0.0
+	if k == json::K_STR: return json::text_of(d, n).len > 0
+	true
+fld(d json::Doc&, n int, key const byte[:]) int:
+	if n < 0 || json::kind(d, n) != json::K_OBJ: return -1
+	r ~= -1
+	json::each(d, n) { if json::key_of(d, it) == key { r = it } }
+	r
+recursive to_str(out byte[>..]&, d json::Doc&, n int):
+	if n < 0:
+		out.append("undefined")
+		return
+	k := json::kind(d, n)
+	if k == json::K_NULL:
+		out.append("null")
+	else if k == json::K_BOOL:
+		v, ok := json::as_bool(d, n)
+		if v:
+			out.append("true")
+		else:
+			out.append("false")
+	else if k == json::K_INT || k == json::K_NUM:
+		v, ok := json::as_f64(d, n)
+		num_str(out, v)
+	else if k == json::K_STR:
+		out.append(json::text_of(d, n))
+	else if k == json::K_ARR:
+		c := json::count(d, n)
+		for j c:
+			if j > 0: out.push(',')
+			e := json::element(d, n, j)
+			if json::kind(d, e) != json::K_NULL: to_str(out, d, e)
+	else:
+		out.append("[object Object]")
+to_num(d json::Doc&, n int) real:
+	if n < 0: return nan_val()
+	k := json::kind(d, n)
+	if k == json::K_NULL: return 0.0
+	if k == json::K_BOOL:
+		v, ok := json::as_bool(d, n)
+		if v: return 1.0
+		return 0.0
+	if k == json::K_INT || k == json::K_NUM:
+		v, ok := json::as_f64(d, n)
+		return v
+	if k == json::K_STR: return str_to_num(json::text_of(d, n))
+	t byte[>..] ~= []
+	to_str(t, d, n)
+	str_to_num(t)
+or_text(out byte[>..]&, d json::Doc&, n int, alt const byte[:]):
+	if truthy(d, n):
+		to_str(out, d, n)
+	else:
+		out.append(alt)
+cut_chars(s const byte[:], count int) const byte[:]:
+	cnt ~= 0
+	for i s.len:
+		if (s[i] & 192) != 128:
+			if cnt == count: return s[..i]
+			cnt += 1
+	s
+idx_val(s const byte[:]) int:
+	if s.len == 0 || s.len > 10: return -1
+	if s == "0": return 0
+	if s[0] < '1' || s[0] > '9': return -1
+	v ~= 0
+	for c s:
+		if !is_digit(c): return -1
+		v = v * 10 + ((c as int) - 48)
+	if v > 4294967294: return -1
+	v
+order_members(d json::Doc&, n int, sc int[>..]&):
+	kids int[>..] ~= []
+	json::each(d, n) { kids.push(it); }
+	m := kids.len
+	prev ~= -1
+	while true:
+		best ~= -1
+		for a m:
+			v := idx_val(json::key_of(d, kids[a]))
+			if v > prev && (best < 0 || v < best): best = v
+		if best < 0: break
+		for a m:
+			nm := json::key_of(d, kids[a])
+			if idx_val(nm) == best:
+				sc.push(fld(d, n, nm))
+				break
+		prev = best
+	for a m:
+		nm := json::key_of(d, kids[a])
+		if idx_val(nm) < 0:
+			dup ~= false
+			for b a:
+				if json::key_of(d, kids[b]) == nm: dup = true
+			if !dup: sc.push(fld(d, n, nm))
+var sj int[>..]
+indent(out byte[>..]&, level int):
+	for q level * 2: out.push(' ');
+recursive stringify(out byte[>..]&, d json::Doc&, n int, pretty bool, level int):
+	if n < 0:
+		out.append("{}")
+		return
+	k := json::kind(d, n)
+	if k == json::K_NULL:
+		out.append("null")
+		return
+	if k == json::K_BOOL:
+		v, ok := json::as_bool(d, n)
+		if v:
+			out.append("true")
+		else:
+			out.append("false")
+		return
+	if k == json::K_INT || k == json::K_NUM:
+		v, ok := json::as_f64(d, n)
+		if v == inf_val() || v == -inf_val():
+			out.append("null")
+		else:
+			num_str(out, v)
+		return
+	if k == json::K_STR:
+		json::format_string(out, json::text_of(d, n))
+		return
+	isarr := k == json::K_ARR
+	b := sj.len
+	if isarr:
+		json::each(d, n) { sj.push(it); }
+	else:
+		order_members(d, n, sj)
+	ks := sj[b..]
+	if ks.len == 0:
+		if isarr:
+			out.append("[]")
+		else:
+			out.append("{}")
+		return
+	if isarr:
+		out.push('[')
+	else:
+		out.push('{')
+	for j ks.len:
+		if j > 0: out.push(',')
+		if pretty:
+			out.push(10)
+			indent(out, level + 1)
+		if !isarr:
+			json::format_string(out, json::key_of(d, ks[j]))
+			out.push(':')
+			if pretty: out.push(' ')
+		stringify(out, d, ks[j], pretty, level + 1)
+	if pretty:
+		out.push(10)
+		indent(out, level)
+	if isarr:
+		out.push(']')
+	else:
+		out.push('}')
+icon_of(out byte[>..]&, d json::Doc&, tn int):
+	nm byte[>..] ~= []
+	to_str(nm, d, tn)
+	if nm == "weather":
+		out.append(IC_WEATHER)
+	else if nm == "system":
+		out.append(IC_SYSTEM)
+	else if nm == "time":
+		out.append(IC_TIME)
+	else if nm == "news":
+		out.append(IC_NEWS)
+	else if nm == "stock":
+		out.append(IC_STOCK)
+	else if nm == "code":
+		out.append(IC_CODE)
+	else if nm == "file":
+		out.append(IC_FILE)
+	else if nm == "git":
+		out.append(IC_GIT)
+	else if nm == "disk":
+		out.append(IC_DISK)
+	else if nm == "watch":
+		out.append(IC_WATCH)
+	else if nm == "error":
+		out.append(IC_ERROR)
+	else if nm == "info":
+		out.append(IC_INFO)
+	else:
+		out.append(IC_OTHER)
+esc_or(out byte[>..]&, d json::Doc&, n int, alt const byte[:]):
+	t byte[>..] ~= []
+	or_text(t, d, n, alt)
+	esc_html(out, t)
+esc_cut(out byte[>..]&, d json::Doc&, n int, count int):
+	t byte[>..] ~= []
+	or_text(t, d, n, "")
+	esc_html(out, cut_chars(t, count))
+round_text(out byte[>..]&, d json::Doc&, n int):
+	if n < 0 || json::kind(d, n) == json::K_NULL:
+		out.append("?")
+	else:
+		num_str(out, js_round(to_num(d, n)))
+base_name(s const byte[:]) const byte[:]:
+	p ~= 0
+	for i s.len:
+		if s[i] == '/': p = i + 1
+	t := s[p..]
+	last ~= 0
+	i ~= 0
+	while i < t.len:
+		if t[i] == '\\' && i + 1 < t.len && t[i + 1] == '\\':
+			last = i + 2
+			i += 2
+		else:
+			i += 1
+	t[last..]
+stock_row(out byte[>..]&, d json::Doc&, q int):
+	chg0 := fld(d, q, "change")
+	chg := if truthy(d, chg0) { chg0 } else { -1 }
+	pct0 := fld(d, q, "change_pct")
+	pct := if truthy(d, pct0) { pct0 } else { -1 }
+	up := chg < 0 || to_num(d, chg) >= 0.0
+	out.append(ST_1)
+	esc_or(out, d, fld(d, q, "symbol"), "?")
+	out.append(ST_2)
+	pr := fld(d, q, "price")
+	if pr >= 0 && json::kind(d, pr) != json::K_NULL:
+		to_fixed(out, to_num(d, pr), 2)
+	else:
+		out.append("?")
+	out.append(ST_3)
+	if up:
+		out.append("up")
+	else:
+		out.append("down")
+	out.append(Q_GT)
+	if up:
+		out.append(IC_STOCK)
+	else:
+		out.append(AR_DOWN)
+	out.push(' ')
+	pv ~= 0.0
+	if pct >= 0: pv = to_num(d, pct)
+	to_fixed(out, pv, 2)
+	out.append(ST_4)
+widget_body(body byte[>..]&, d json::Doc&, tn int, dn int):
+	kd const byte[:] ~= ""
+	if tn >= 0 && json::kind(d, tn) == json::K_STR: kd = json::text_of(d, tn)
+	if kd == "weather":
+		body.append(WX_1)
+		round_text(body, d, fld(d, dn, "temp_c"))
+		body.append(WX_2)
+		esc_or(body, d, fld(d, dn, "description"), "")
+		body.append(DOT)
+		esc_or(body, d, fld(d, dn, "location"), "")
+		body.append(WX_3)
+		round_text(body, d, fld(d, dn, "high_c"))
+		body.append(WX_4)
+		round_text(body, d, fld(d, dn, "low_c"))
+		body.append(WX_5)
+		or_text(body, d, fld(d, dn, "humidity_pct"), "?")
+		body.append(WX_6)
+	else if kd == "system":
+		body.append(SY_GRID)
+		cpu := fld(d, dn, "cpu_pct")
+		if cpu >= 0 && json::kind(d, cpu) != json::K_NULL:
+			body.append(SY_CPU)
+			to_str(body, d, cpu)
+			body.append(SY_PCT)
+		mem := fld(d, dn, "mem_pct")
+		if mem >= 0 && json::kind(d, mem) != json::K_NULL:
+			body.append(SY_MEM)
+			to_str(body, d, mem)
+			body.append(SY_PCT)
+		dsk := fld(d, dn, "disk_pct")
+		if dsk >= 0 && json::kind(d, dsk) != json::K_NULL:
+			body.append(SY_DISK)
+			to_str(body, d, dsk)
+			body.append(SY_PCT)
+		gpu := fld(d, dn, "gpu_name")
+		if truthy(d, gpu):
+			body.append(SY_GPU)
+			esc_cut(body, d, gpu, 18)
+			body.append(W_END)
+		body.append(DIV_END)
+	else if kd == "time":
+		body.append(TM_1)
+		th := fld(d, dn, "time_human")
+		tsel := if truthy(d, th) { th } else { fld(d, dn, "iso") }
+		esc_or(body, d, tsel, "?")
+		body.append(TM_2)
+		esc_or(body, d, fld(d, dn, "weekday"), "")
+		body.append(DOT)
+		esc_or(body, d, fld(d, dn, "date_human"), "")
+		body.append(DOT)
+		esc_or(body, d, fld(d, dn, "tz"), "")
+		body.append(DIV_END)
+	else if kd == "news":
+		items := fld(d, dn, "items")
+		if items >= 0 && json::kind(d, items) == json::K_ARR:
+			cnt := min(5, json::count(d, items))
+			for k cnt:
+				itm := json::element(d, items, k)
+				body.append(A_1)
+				esc_or(body, d, fld(d, itm, "url"), "#")
+				body.append(A_2)
+				esc_cut(body, d, fld(d, itm, "title"), 140)
+				body.append(NW_SRC)
+				esc_cut(body, d, fld(d, itm, "source"), 30)
+				body.append(SPAN_END)
+				body.append(A_END)
+	else if kd == "stock":
+		qs := fld(d, dn, "quotes")
+		if qs >= 0 && json::kind(d, qs) == json::K_ARR:
+			for k json::count(d, qs):
+				stock_row(body, d, json::element(d, qs, k))
+	else if kd == "git":
+		body.append(GT_1)
+		esc_or(body, d, fld(d, dn, "branch"), "?")
+		body.append(GT_2)
+		or_text(body, d, fld(d, dn, "dirty_n"), "0")
+		body.append(GT_3)
+		or_text(body, d, fld(d, dn, "ahead"), "0")
+		body.append(GT_4)
+		or_text(body, d, fld(d, dn, "behind"), "0")
+		body.append(DIV_END)
+		rcn := fld(d, dn, "recent_commits")
+		cm byte[>..] ~= []
+		if truthy(d, rcn) && json::kind(d, rcn) == json::K_ARR:
+			for k json::count(d, rcn):
+				if k > 0: cm.append("<br>")
+				esc_or(cm, d, json::element(d, rcn, k), "")
+		if cm.len > 0:
+			body.append(GT_5)
+			body.append(cm)
+			body.append(DIV_END)
+	else if kd == "file":
+		body.append(FL_1)
+		pt byte[>..] ~= []
+		or_text(pt, d, fld(d, dn, "path"), "")
+		esc_html(body, base_name(pt))
+		body.append(DOT)
+		or_text(body, d, fld(d, dn, "lines_shown"), "0")
+		body.append(FL_2)
+		sb := fld(d, dn, "size_bytes")
+		x ~= 0.0
+		if truthy(d, sb): x = to_num(d, sb)
+		num_str(body, js_round(x / 1024.0))
+		body.append(FL_3)
+		esc_cut(body, d, fld(d, dn, "preview"), 1500)
+		body.append(PRE_END)
+	else if kd == "code":
+		body.append(CD_1)
+		esc_or(body, d, fld(d, dn, "code"), "")
+		body.append(PRE_END)
+	else if kd == "error" || kd == "info":
+		m := fld(d, dn, "message")
+		if truthy(d, m):
+			t byte[>..] ~= []
+			to_str(t, d, m)
+			esc_html(body, t)
+		else:
+			s byte[>..] ~= []
+			stringify(s, d, dn, false, 0)
+			esc_html(body, cut_chars(s, 300))
+	else:
+		body.append(FB_1)
+		s byte[>..] ~= []
+		stringify(s, d, dn, true, 0)
+		esc_html(body, cut_chars(s, 500))
+		body.append(PRE_END)
+widget(out byte[>..]&, d json::Doc&, n int):
+	if n < 0 || json::kind(d, n) != json::K_OBJ: return
+	tn := fld(d, n, "type")
+	if !truthy(d, tn): return
+	tw := fld(d, n, "title")
+	ic := fld(d, n, "icon")
+	dr := fld(d, n, "data")
+	dn := if truthy(d, dr) { dr } else { -1 }
+	out.append(W_OPEN_1)
+	to_str(out, d, tn)
+	out.append(Q_GT)
+	out.append(W_HEAD_1)
+	t1 byte[>..] ~= []
+	if truthy(d, ic):
+		to_str(t1, d, ic)
+	else:
+		icon_of(t1, d, tn)
+	esc_html(out, t1)
+	out.append(W_HEAD_2)
+	t2 byte[>..] ~= []
+	if truthy(d, tw):
+		to_str(t2, d, tw)
+	else:
+		to_str(t2, d, tn)
+	esc_html(out, t2)
+	out.append(W_HEAD_3)
+	out.append(W_BODY)
+	widget_body(out, d, tn, dn)
+	out.append(W_END)

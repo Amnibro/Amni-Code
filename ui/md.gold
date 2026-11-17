@@ -1,0 +1,227 @@
+into md.he
+lang he
+namespace md
+use std
+use json
+
+This module ports a JavaScript markdown renderer and must reproduce its output exactly, quirks included, so follow every description literally. Text is UTF-8 bytes, positions are byte offsets, and input is assumed to be valid UTF-8. Output is always appended to the end of a byte buffer parameter named out. A word character is an ASCII letter, digit or underscore. Whitespace means JavaScript whitespace as measured by `space_at`. Non-ASCII characters are never word characters and are copied through whole and unchanged. A left to right scan that finds a match continues right after that match without looking inside it. A function that gives several values returns them as a calling convention result.
+
+```he
+HL_COM := "<span class=\"hl-com\">"
+HL_STR := "<span class=\"hl-str\">"
+HL_NUM := "<span class=\"hl-num\">"
+HL_KW := "<span class=\"hl-kw\">"
+HL_FN := "<span class=\"hl-fn\">"
+HL_OP := "<span class=\"hl-op\">"
+SPAN_END := "</span>"
+A_1 := "<a href=\""
+A_2 := "\" target=\"_blank\" rel=\"noopener\">"
+A_END := "</a>"
+IMG_1 := "<img src=\""
+IMG_2 := "\" alt=\""
+IMG_3 := "\" loading=\"lazy\">"
+Q_GT := "\">"
+TASK_1 := "<span class=\"task\"><input type=\"checkbox\" disabled"
+TASK_CHECKED := " checked"
+TBL_1 := "<div class=\"tw\"><table><thead><tr>"
+TBL_2 := "</tr></thead><tbody>"
+TBL_3 := "</tbody></table></div>"
+ALIGN_1 := " style=\"text-align:"
+OL_START := "<ol start=\""
+FENCE_1 := "<div class=\"cb\"><div class=\"cb-bar\"><span class=\"cb-lang\">"
+FENCE_2 := "</span><button type=\"button\" class=\"cb-copy\">copy</button></div><pre><code class=\"lang-"
+FENCE_4 := "</code></pre></div>"
+D_COM_1 := "<span style=\"color:#6a9955;font-style:italic\">"
+D_KW_1 := "<span style=\"color:#569cd6\">"
+W_HEAD_1 := "<div class=\"w-head\"><span class=\"icon\">"
+W_HEAD_2 := "</span><span>"
+W_HEAD_3 := "</span></div>"
+W_OPEN_1 := "<div class=\"amni-widget "
+W_BODY := "<div class=\"w-body\">"
+W_END := "</div></div>"
+DIV_END := "</div>"
+PRE_END := "</pre>"
+IC_WEATHER := "☁"
+IC_SYSTEM := "⚙"
+IC_TIME := "⧗"
+IC_NEWS := "▤"
+IC_STOCK := "▲"
+IC_CODE := "<>"
+IC_FILE := "·"
+IC_GIT := "⎇"
+IC_DISK := "▢"
+IC_WATCH := "□"
+IC_ERROR := "!"
+IC_INFO := "i"
+IC_OTHER := "◆"
+AR_DOWN := "▼"
+DOT := " · "
+WX_1 := "<div class=\"temp\">"
+WX_2 := "°C</div><div>"
+WX_3 := "</div><div class=\"meta\">HI "
+WX_4 := "° · LO "
+WX_5 := "° · "
+WX_6 := "% humid</div>"
+SY_GRID := "<div class=\"grid\">"
+SY_CPU := "<div class=\"stat\">CPU<div class=\"v\">"
+SY_MEM := "<div class=\"stat\">MEM<div class=\"v\">"
+SY_DISK := "<div class=\"stat\">DISK<div class=\"v\">"
+SY_GPU := "<div class=\"stat\">GPU<div class=\"v\" style=\"font-size:11px\">"
+SY_PCT := "%</div></div>"
+TM_1 := "<div style=\"font-size:18px;color:var(--accent)\">"
+TM_2 := "</div><div style=\"font-size:11px;color:var(--text2)\">"
+NW_SRC := "<span class=\"src\">"
+ST_1 := "<div class=\"row\"><span><strong>"
+ST_2 := "</strong> "
+ST_3 := "</span><span class=\"chg "
+ST_4 := "%</span></div>"
+GT_1 := "<div><span class=\"branch\">⎇ "
+GT_2 := "</span> · dirty "
+GT_3 := " · ahead "
+GT_4 := " · behind "
+GT_5 := "<div class=\"commits\">"
+FL_1 := "<div style=\"font-size:11px;color:var(--text2);margin-bottom:4px\">"
+FL_2 := " lines · "
+FL_3 := "kb</div><pre style=\"margin:0;font-size:11px;max-height:160px\">"
+CD_1 := "<pre style=\"margin:0;font-size:11px;max-height:200px\">"
+FB_1 := "<pre style=\"margin:0;font-size:11px\">"
+KW_PY := "and as assert async await break class continue def del elif else except finally for from global if import in is lambda nonlocal not or pass raise return try while with yield None True False self"
+KW_JS := "await async break case catch class const continue default delete do else export extends finally for function if import in instanceof let new of return static super switch this throw try typeof var void while yield null true false undefined"
+KW_RS := "as async await break const continue crate dyn else enum extern fn for if impl in let loop match mod move mut pub ref return self static struct super trait type unsafe use where while true false"
+KW_SH := "if then else elif fi for while do done case esac function return export local source echo cd exit"
+KW_SQL := "select from where insert update delete join left right inner outer group by order having limit values set into create table drop alter"
+KW_GO := "break case chan const continue default defer else fallthrough for func go goto if import interface map package range return select struct switch type var nil true false"
+KW_DIFF := "function const let var return if else for while import from class def async await fn pub use struct impl match self true false null None undefined mut mod enum trait type where loop break continue"
+```
+
+`esc(out, text)` appends text with the five characters ampersand, less-than, greater-than, double quote and single quote replaced by "&amp;", "&lt;", "&gt;", "&quot;" and "&#39;"; every other byte is copied unchanged.
+
+`esc_html(out, text)` appends text with only ampersand, less-than and greater-than replaced by "&amp;", "&lt;" and "&gt;", and each no-break space (the two bytes C2 A0) replaced by "&nbsp;"; quotes and everything else are copied unchanged. This is what a browser gives when text is set on an element and its inner HTML is read back.
+
+`space_at(s, i)` gives the byte length of the whitespace character that starts at byte i of s, or 0 when none does or i is out of range. Whitespace is tab, line feed, vertical tab, form feed, carriage return, space, no-break space (U+00A0), U+1680, U+2000 to U+200A, U+2028, U+2029, U+202F, U+205F, U+3000 and U+FEFF, read as UTF-8.
+
+`space_before(s, j)` gives the byte length of the whitespace character that ends just before byte offset j of s (it starts at j minus that length and `space_at` measures it), or 0 when there is none; try the lengths 1, 2 and 3.
+
+`trim_js(s)` gives the part of s left after removing whitespace characters from both ends, using `space_at` forward from the start and `space_before` backward from the end.
+
+`is_blank(s)` is true when `trim_js(s)` is empty.
+
+`is_word(c)` is true when the byte c is an ASCII letter, digit or underscore.
+
+`lower_ascii(out, s)` appends s with the ASCII letters A to Z turned into a to z and every other byte unchanged.
+
+`has_ls(s)` is true when s contains the character U+2028 or U+2029 (the bytes E2 80 A8 or E2 80 A9). A JavaScript dot does not match them, so the line patterns below that read "the rest of the line" refuse a line containing one.
+
+`starts_at(s, i, t)` is true when the bytes of s from offset i begin with the text t, and false when s is too short or i is out of range.
+
+`kw_table(lang)` gives the keyword table text for an already lowercase lang: KW_JS for js, javascript, ts, typescript, jsx, tsx, java and kotlin; KW_RS for rs, rust, c, cpp and swift; KW_SH for sh, bash, shell, zsh, ps1 and powershell; KW_SQL for sql; KW_GO for go and golang; KW_PY for everything else (python, py, json, empty and unknown names).
+
+`kw_has(table, w)` is true when w is exactly one of the words of table, which are separated by single spaces; the comparison is case sensitive.
+
+`hl(out, src, lang)` appends src as syntax highlighted HTML and gives true. It lowercases lang with `lower_ascii`; when the result is exactly "constructor" or "__proto__" it appends nothing and gives false. Otherwise it takes the keyword table from `kw_table`. Here a word character also includes the dollar sign. A hash sign starts a comment unless the lowercase lang is exactly "json" or begins with one of "js", "ts", "rs", "go", "c" or "java". Walk src from the left, byte offset i; at the byte c the first rule that applies is used. Rule 1, line comment: c is a hash sign that starts a comment, or c and the next byte are two slashes; the comment runs from c up to but not including the next line feed, or to the end of src; append HL_COM, the comment through `esc`, then SPAN_END. Rule 2, block comment: c is a slash and the next byte is an asterisk; search for the first "*/" starting at c itself (so "/*/" is a complete comment); the comment ends right after it, or at the end of src when there is none; same spans as rule 1. Rule 3, string: c is a double quote, single quote or backtick; the string runs from c to the next byte equal to c, where a backslash is skipped together with the byte after it, and the closing quote is included; an unterminated string runs to the end of src; append HL_STR, the string through `esc`, then SPAN_END. Rule 4, number: c is an ASCII digit and the byte before c, if any, is not a word character; the number runs over the following bytes that are digits, a to f, A to F, x, X, dot or underscore; append HL_NUM, the number through `esc`, then SPAN_END. Rule 5, word: c is a word character; the word runs over word characters; then look at the first byte after the word and any space characters (only the space character) following it; when the word is in the keyword table append HL_KW, the word through `esc`, SPAN_END; otherwise when that looked-at byte is an opening parenthesis append HL_FN, the word through `esc`, SPAN_END; otherwise append the word through `esc`. Rule 6, operator: c is one of plus, hyphen, asterisk, slash, percent, equals, less-than, greater-than, exclamation mark, vertical bar, caret, tilde, colon or question mark; append HL_OP, c through `esc`, SPAN_END. Rule 7: append c through `esc` and move one byte.
+
+`code_span_at(s, p)` looks for an inline code span whose opening backticks start at p, where s has a backtick at p. Let k be the number of consecutive backticks starting at p. Try m from k down to 1 and use the first m that works: q is p plus m; look for the smallest e greater than q such that the byte before e is not a backtick, the m bytes starting at e are all backticks, and the byte at e plus m (if there is one) is not a backtick. It gives found (true or false), then q, e and the end of the span, e plus m; the content is the bytes from q up to e.
+
+`stash_code(rest, s, pool, ends)` copies s into rest but replaces inline code spans by placeholders. Scan s left to right; at each backtick byte p try `code_span_at`; when it finds a span append its content to the byte buffer pool and the new length of pool to the int list ends, write to rest the three bytes EE 80 A0 (U+E020), the decimal number of that span (the count of spans stashed before it, from 0) and the three bytes EE 80 A1 (U+E021), and continue after the span. Otherwise copy the byte at p and go on to p plus one.
+
+`unstash(out, s, pool, ends)` copies s into out but replaces each placeholder, which is the bytes EE 80 A0, one or more ASCII digits, then the bytes EE 80 A1, by "<code>", then `esc` of the stashed content whose number is the value of the digits (leading zeros ignored), then "</code>". The content number k is the pool bytes from ends at k minus one (0 for k equal 0) up to ends at k. When k is not below the number of stashed contents the content is empty (so "<code></code>" is written); a digit string too long to be an index also counts as out of range.
+
+`brackets(out, s, image)` copies s into out replacing markdown images when image is true, or markdown links when image is false. Scan s left to right at p. A candidate starts when image is true and s has an exclamation mark at p followed by an opening bracket, or when image is false and s has an opening bracket at p. Let a be the offset just after that opening bracket. The candidate matches when: the first closing bracket at or after a (so the label may hold any other characters, even line feeds, but no closing bracket) is directly followed by an opening parenthesis; after that parenthesis skip whitespace characters (using `space_at`); the URL is then the longest run of one or more characters that are neither a closing parenthesis nor whitespace; after the URL there is a closing parenthesis somewhere later in s (anything except a closing parenthesis, whitespace and newlines included, may lie between) and the match ends just after the first such parenthesis. The label is the bytes between the brackets; the URL is as found, unchanged. When the candidate matches and the URL begins with "http:", "https:" or "data:image/" (for images), or with "http:", "https:", "mailto:", "#" or "/" (for links), append the replacement: for an image IMG_1, the URL, IMG_2, the label, IMG_3; for a link A_1, the URL, A_2, the label (or the URL when the label is empty), A_END. When the candidate matches but the URL does not begin with one of those prefixes, copy the whole matched text unchanged and continue after it. When the candidate does not match copy the byte at p and go on to p plus one.
+
+`autolink(out, s)` copies s into out turning bare web addresses into links. Scan s at position i from 0, moving past each match. At i try two ways. Way one: i is 0 and a web address starts at i, with no prefix. Way two: s has a whitespace character at i (use `space_at`, its byte length is the prefix length) or an opening parenthesis at i, and a web address starts right after that one prefix character. A web address starts at u when s has "http://", "https://" or "www." at u, all lowercase. Let r be the end of the longest run of characters starting right after that scheme that are not whitespace, not a less-than sign and not a closing parenthesis. The address ends right after the last character inside that run (after the scheme) that is not one of period, comma, semicolon, colon, exclamation mark, question mark, single quote or double quote; when the run has no such character there is no web address at u. When a web address is found, copy the prefix character as it is, then append A_1, "https://" only when the address begins with "www.", the address, A_2, the address, A_END, and continue scanning right after the address. When no web address is found at i copy the byte at i and go on to i plus one.
+
+`emph(out, s, kind)` copies s into out turning one kind of emphasis pairs into HTML. The kind picks the rules. Kind 0: delimiter "***", opening text "<strong><em>", closing text "</em></strong>", plain. Kind 1: delimiter "**", "<strong>", "</strong>", plain. Kind 2: delimiter "__", "<strong>", "</strong>", word edged. Kind 3: delimiter "*", "<em>", "</em>", word edged, restricted with asterisk as the stopper, and the byte before the opening may not be an asterisk. Kind 4: delimiter "_", "<em>", "</em>", word edged, restricted with underscore as the stopper. Kind 5: delimiter "~~", "<s>", "</s>", plain. Let n be the length of s and d the length of the delimiter. `from` starts at 0 and is the end of the previous match. Scan p from 0. A delimiter is at p when s has the delimiter text at p. It may open when the kind is plain, or the kind is word edged and either p is 0 or (p is greater than from and the byte before p is not a word character and, for kind 3 only, not an asterisk). Let q be p plus d; opening needs q below n and a non-whitespace character at q (`space_at` of q is 0). Then look for the closing: for e from q plus one upward while e plus d is not above n: first, if s has the delimiter at e and `space_before` of e is 0 (the content does not end with whitespace) and either the kind is plain or e plus d equals n or the byte at e plus d is not a word character, then this is the closing; otherwise, when the kind is restricted and the byte just before e (at e minus one) is the stopper byte or a line feed, give up the search with no match; otherwise try the next e. On a match append the opening text, the bytes of s from q up to e unchanged, the closing text, set both p and from to e plus d and continue. When there is no match at p copy the byte at p and go on to p plus one.
+
+`line_breaks(out, s)` copies s into out replacing every maximal run of two or more spaces or tabs that is directly followed by a line end by "<br>". A line end is the end of s or one of line feed, carriage return, U+2028 or U+2029. A single trailing space or tab is copied unchanged.
+
+`task_text(out, text)` appends the list item text: when text starts with an opening bracket, then one of a space, "x" or "X", then a closing bracket, then one or more spaces or tabs, append TASK_1, then TASK_CHECKED unless that character was the space, then ">", then `inline` of everything after those spaces and tabs, then "</span>"; otherwise append `inline` of text.
+
+`inline(out, text)` appends the inline HTML for text. The function is named exactly `inline` (a plain name, not reserved in Helium) and every call to it, in every block, uses that name; do not rename it to anything else, not even to avoid the word inline. Run these passes in order, each reading the output of the previous one (alternate between scratch buffers): `stash_code` (with a scratch pool and ends); `esc`; `brackets` for images; `brackets` for links; `autolink`; `emph` with kinds 0, 1, 2, 3, 4 and 5 in that order; `line_breaks`; and finally `unstash` into out.
+
+```he
+struct Item { ind int, ord int, num int, from int }
+```
+
+`line(text, lb, i)` gives the bytes of line i of a line table: text together with the int list lb holding for each line its start offset and its end offset one after the other (the end does not include the line feed), so line i is the text from lb at position 2 i up to lb at position 2 i plus 1. `split_lines(text, lb)` clears lb and fills it by splitting text at line feeds; empty text is one empty line, and a text ending in a line feed ends with an empty line.
+
+`normalize(out, s)` appends s with every carriage return plus line feed pair and every lone carriage return turned into one line feed.
+
+`hr_line(line)` is true when line, after at most three leading spaces (only the space character), has one marker byte which is a hyphen, asterisk or underscore, and the rest of the line holds only that same marker byte, spaces and tabs, with at least three marker bytes in all counting the first.
+
+`head_of(line)` gives three numbers: the count of hash signs that open a heading (0 when line is not a heading), and the start and end byte offsets of the heading text in line. A heading is: at most three leading spaces, then a run of hash signs whose length is from 1 to 6 (a longer run is not a heading), then at least one space or tab, with the whole line free of U+2028 and U+2029 (`has_ls`). The text starts after all the spaces and tabs that follow the hash signs; its end is found by cutting from the end of the line first all trailing spaces and tabs, then all trailing hash signs, then all trailing spaces and tabs again, never cutting before the text start.
+
+`quote_of(line)` gives whether line is a quote line and the offset where its text starts: at most three leading spaces, a greater-than sign, then one optional space or tab, and the text is the rest of the line; a line containing U+2028 or U+2029 is not a quote line.
+
+`li_of(line)` gives five values: whether line is a list item line, the indent width, whether it is ordered (1 or 0), the number, and the offset where the item text starts. A list line is: the indent (any number of spaces and tabs), then a marker which is one hyphen, asterisk, plus sign or bullet U+2022 (bytes E2 80 A2), or a run of one to nine ASCII digits (a longer digit run is not a marker) followed by one period or closing parenthesis, then one or more spaces or tabs, then the rest of the line as the text, which starts after all those spaces and tabs; a line containing U+2028 or U+2029 is not a list line. The indent width counts a space as 1 and a tab as 2. Ordered is 1 for the digit marker. The number is the value of the digits, or 1 when that value is 0.
+
+`code_of(line)` gives whether line is an indented code line and where its text starts: the line starts with four spaces or else with one tab, and the text is the rest of the line; a line containing U+2028 or U+2029 is not a code line.
+
+`is_block(line)` is true when line is `hr_line`, or a heading, or a quote line, or a list line.
+
+`delim_row(line)` is true when line is a table delimiter row: it contains at least one vertical bar, and it is made of optional spaces and tabs, an optional vertical bar, then one or more columns separated by single vertical bars, then an optional final vertical bar and optional spaces and tabs up to the end of the line. A column is optional spaces and tabs, an optional colon, one or more hyphens, an optional colon, and optional spaces and tabs; nothing else may appear.
+
+`table_start(text, lb, i)` is true when line i plus one exists, line i contains a vertical bar, and line i plus one is a `delim_row`.
+
+`cells(row, pool, ends)` clears pool and ends and fills them with the cells of a table row, cell k being the pool bytes from ends at k minus one (0 for the first) up to ends at k. First take the row trimmed with `trim_js`; lead is true when it starts with a vertical bar; trail is true when its length is above 1, it ends with a vertical bar and the byte before that is not a backslash. Walk the trimmed row with a flag tick, initially off, building the current cell: a backslash directly followed by a vertical bar adds a vertical bar to the cell and skips both bytes; a backtick flips tick and is added to the cell; a vertical bar while tick is off ends the current cell and starts a new empty one; every other byte is added. After the walk the last cell is added too. Then drop the first cell when lead is true, and then drop the last cell when trail is true. Store the kept cells each trimmed with `trim_js`; the result can be an empty list.
+
+`align_of(cell)` gives 2 when cell is a colon, one or more hyphens, then a colon; 1 when it is a colon then one or more hyphens; 3 when it is one or more hyphens then a colon; otherwise 0 (1 is left, 2 is center, 3 is right).
+
+`table(out, text, lb, i)` renders the table whose header row is line i, the next line being the delimiter row. It gives false and writes nothing when the cells of the header row (`cells`) are an empty list; otherwise it writes the table HTML and gives true and the index of the first line after the table. Header cells are the cells of line i; the alignment of column k is `align_of` of cell k of the delimiter row (line i plus one), and is 0 for columns the delimiter row lacks. The body rows are the lines from i plus 2 on while the line is not blank, contains a vertical bar and is not a `delim_row`. Write TBL_1, then each header cell as a cell with tag "th", TBL_2, then for each body row a "<tr>", one cell with tag "td" for each header column (using the row's cell k, or an empty text when the row has fewer cells; extra cells are ignored), "</tr>", and finally TBL_3. A cell is: "<", the tag, then when the alignment is not 0 ALIGN_1, the word left, center or right, and a double quote, then ">", `inline` of the cell text, "</", the tag, ">".
+
+`gather(text, lb, i, items, pool)` collects list items starting at line i into the list of `Item` records items and the byte buffer pool, and gives the index of the first line not used. Loop on i: when line i is a list line (`li_of`), add an Item with the indent width, ordered flag and number, whose from is the pool length, append the item text to pool, and go to the next line. Otherwise when line i is blank, let j be the first non-blank line after it; when j exists and is a list line continue the loop at j, else stop. Otherwise, when at least one item exists and line i starts with two or more spaces or tabs followed by a character that is not whitespace, append a line feed and the `trim_js` of line i to pool (this continues the last item) and go to the next line; otherwise stop. The text of item k is the pool from its from up to the from of item k plus one (up to the pool end for the last item).
+
+`render_list(html, items, pool, pos, ind)` appends one list to html and gives the position just after its last item. The list starts at item pos and is ordered when that item is. An ordered list starts with OL_START, the first item's number, Q_GT when that number is above 1, and with "<ol>" otherwise; an unordered list starts with "<ul>". Then, while pos is inside items and the indent of item pos is at least ind: when that indent is greater than ind, make a nested list by calling `render_list` into a fresh buffer sub with the same items, the current pos and ind set to that item's indent, which advances pos; then, when html currently ends with "</li>", cut that "</li>" off html and append the splice text and then "</li>", where the splice text is sub changed by these JavaScript replacement pattern rules, read left to right without overlap: a dollar sign followed by a dollar sign gives one dollar sign; a dollar followed by an ampersand gives "</li>"; a dollar followed by a single quote gives nothing; a dollar followed by a backtick gives all of html as it was before that final "</li>" was cut (the html so far of this list); any other dollar sign stays as it is; and when html does not end with "</li>" append "<li>", sub unchanged, and "</li>". Otherwise (the indent equals ind): when the ordered flag of the item differs from the list's, stop; else append "<li>", `task_text` of the item text, "</li>" and go to the next item. At the end append "</ol>" or "</ul>" to match the list.
+
+`blocks(out, src)` appends the block HTML for src. First `normalize` src, then `split_lines` it. Handle the lines from i equal 0; the first rule that applies to line i wins. Rule 1: line i is blank; skip it. Rule 2: `hr_line`; append "<hr>" and go to the next line. Rule 3: `head_of` gives a count above 0; the level n is that count but at most 4; append "<h", n, ">", `inline` of the heading text, "</h", n, ">" and go to the next line. Rule 4: `quote_of` says quote line; collect lines from i while the line is not blank and either it is a quote line or at least one line was already collected and it is not `is_block`; each collected line contributes its quote text when it is a quote line and otherwise its whole `trim_js`; join the contributions with line feeds; append "<blockquote>", `blocks` of the joined text, "</blockquote>", and continue after the last collected line. Rule 5: when `table_start` is true at i, try `table`; when it succeeded continue at the index it gave; when it did not, go on to the next rules. Rule 6: `li_of` says list line; clear items and pool, call `gather` from i, then with pos starting at 0, while pos is below the number of items call `render_list` into a fresh buffer with ind set to the indent of item pos, append that buffer to out, and set pos to the returned position when it is above pos and to pos plus one otherwise; continue at the index `gather` gave. Rule 7: `code_of` says code line; collect entries: loop at i, when line i is blank find the first non-blank line j at or after i and stop when there is none or line j is not a code line, otherwise add an empty entry and set i to j; else when line i is not a code line stop; else add the code text of line i and go to the next line; append "<pre><code>", the entries separated by line feeds through `esc`, "</code></pre>". Rule 8: a paragraph: take lines from i while the line is not blank, not `is_block` and `table_start` is false at it; when no line was taken take line i anyway; join the taken lines with line feeds, build `inline` of that text in a scratch buffer, and append "<p>", the scratch text with every run of one or more line feeds replaced by a single space, then "</p>".
+
+`fence(out, lang, src)` appends one highlighted code block and gives whether it worked. Lowercase lang with `lower_ascii`; append FENCE_1, the lowercase lang through `esc` (or "text" when it is empty), FENCE_2, the lowercase lang through `esc` (or "txt" when it is empty), Q_GT, then `hl` of src with the lowercase lang, then FENCE_4. It gives false when `hl` gave false.
+
+`extract_fences(rest, s, pool, ends)` copies s into rest with each fenced code block replaced by a placeholder, and stores the blocks: for each block two numbers are appended to the int list ends, the length of the byte buffer pool after its language was appended and the length after its source text was appended. A fence can start at a line start a, which is 0 or one past a line feed at i. At a: skip at most three spaces or tabs, then there must be three backticks or three tildes (the marker), then the info is everything up to the next line feed, which must exist, and the body starts after that line feed. The block ends at the first offset e at or after the body start where s has a line feed followed by a closing line: at most three spaces or tabs, then the marker repeated one or more times (the same three bytes back to back), then any spaces and tabs, then a line feed or the end of s; the match end is the end of those trailing spaces and tabs, before the line feed. When there is no such e the body runs to the end of s and the match end is the end of s. The body is s from the body start up to e. The language is the info trimmed with `trim_js` and cut before its first whitespace character or comma. Walk i from 0: when i is 0 first try a fence at line start 0; when that did not match, or i is above 0, and the byte at i is a line feed, try a fence at i plus one, and on a match write that line feed first. On a match write the placeholder, which is the bytes EE 80 B0 (U+E030), the decimal number of the block counting from 0, and the bytes EE 80 B1 (U+E031), and continue at the match end. Otherwise copy the byte at i (when i is below the length) and go to i plus one.
+
+`restore_fences(out, h, pool, ends)` copies h into out replacing fence placeholders by `fence` blocks and gives whether every `fence` worked. A placeholder is the bytes EE 80 B0, one or more ASCII digits, then the bytes EE 80 B1. Scan h left to right at i. A match is: the text "<p>" (optional, only when h has it at i and a placeholder follows it directly), then the placeholder, then the text "</p>" (optional, taken whenever h has it directly after the placeholder, whether or not the match began with "<p>"). So a placeholder with no "<p>" before it still takes the "</p>" that follows it. Block number k is the value of the digits (leading zeros ignored). When k is below the number of stored blocks append `fence` of block k's language and source (the language is the pool bytes from ends at 2 k minus one, or 0 for the first, up to ends at 2 k, and the source is the pool bytes from ends at 2 k up to ends at 2 k plus one); otherwise, including digit strings too long to be an index, append nothing. Otherwise copy the byte at i.
+
+`md(out, text)` appends the markdown HTML of text and gives false when a `fence` failed. Steps: `normalize` text, `extract_fences` into a second buffer, `blocks` of that into a third buffer, then `restore_fences` of the third into out.
+
+`render(out, text)` is the public entry point. It remembers the length of out and calls `md`; when `md` gives false it cuts out back to the remembered length and appends "<p>", text through `esc`, and "</p>".
+
+`diff_line(out, text)` appends the colored HTML of one diff line. Put text through `esc_html` into a scratch buffer e. Pass one, comments: copy e into a second scratch buffer, scanning left to right at p; a comment starts at p when e has two slashes at p, or when e has a hash sign at p followed by at least one more character that is not an opening brace (the character after the hash sign may be any character, a line terminator included, and counts with all its bytes). A comment covers its start (the two slashes, or the hash sign and that one character) and then every following character up to but not including the next line feed, carriage return, U+2028 or U+2029, or to the end. For each comment append D_COM_1, the comment bytes as they are, and SPAN_END, and continue right after it; where no comment starts copy the byte at p. Pass two, keywords: scan the pass one result and for every maximal run of word characters (ASCII letters, digits, underscore) that is exactly one of the words of KW_DIFF append D_KW_1, the run and SPAN_END, copying everything else unchanged. When the final result is empty append "&nbsp;", otherwise append it.
+
+`num_str(out, v)` appends the way JavaScript prints the number v. NaN gives "NaN". Zero of either sign gives "0". A negative v gives "-" and then `num_str` of its negation. Infinity gives "Infinity". Otherwise take the shortest digits and the power of ten from `json::digits_of` (called with the positive value; the digits have no trailing zeros, k is how many there are, and the power e is the power of ten of the first digit) and let n be e plus 1. When k is at most n and n is at most 21, write the digits and then n minus k zeros. Otherwise when n is above 0 and at most 21, write the first n digits, a period and the other digits. Otherwise when n is above minus 6 and at most 0, write "0.", then minus n zeros, then the digits. Otherwise write the first digit; when k is above 1 a period and the other digits; then "e", then "+" when n minus 1 is not negative and "-" otherwise, then the decimal absolute value of n minus 1.
+
+`to_fixed(out, v, f)` appends the way JavaScript's toFixed prints v with f digits after the point. NaN gives "NaN". When v is infinite or its absolute value is at least 1e21 it gives `num_str` of v. Otherwise a negative v gives "-" and then the rest for its negation, and a zero v is treated as positive zero; the rest is `std::format_flt` with f decimals and its away flag true (ties round away from zero).
+
+`fmt_size(out, bytes)` appends a size the way JavaScript does: when bytes is at least 1073741824, `to_fixed` of bytes divided by 1073741824 with 1 decimal, then " GB"; otherwise when it is at least 1048576, `to_fixed` of bytes divided by 1048576 with 0 decimals, then " MB"; otherwise when it is at least 1024, `to_fixed` of bytes divided by 1024 with 0 decimals, then " KB"; otherwise `num_str` of bytes and " B". The division is a plain real division.
+
+`str_to_num(s)` gives the number JavaScript's Number() makes of the text s, or NaN when it is not a number. Take `trim_js` of s. Empty gives 0. "Infinity" and "+Infinity" give infinity and "-Infinity" gives minus infinity. A text that begins with "0x" or "0X" and has one or more hexadecimal digits and nothing else gives their value; the same for "0o" or "0O" with octal digits and "0b" or "0B" with binary digits (these three forms take no sign). Otherwise the text must be exactly: one optional plus or hyphen, then either digits with an optional period and further digits, or a period and one or more digits, then optionally "e" or "E", an optional plus or hyphen and one or more digits; for such a text give `std::parse_flt` of it; anything else gives NaN.
+
+`js_round(v)` gives JavaScript's Math.round of v: NaN and infinities and any v with absolute value at least 4503599627370496.0 give v itself; otherwise let f be the largest whole number not above v, and give f plus 1 when v minus f is at least 0.5 and f otherwise.
+
+`truthy(d, n)` is JavaScript truthiness of the json node n of document d: false for n below 0 (missing), null, false, a number equal to 0 and an empty string, true for everything else, including true, other numbers, non-empty strings, arrays and objects.
+
+`fld(d, n, key)` gives the node of the last member named key of the object node n of d, or -1 when n is below 0 or not an object or has no such member. Members are walked from the object's first child through the next links, and `json::key_of` is the member name.
+
+`to_str(out, d, n)` appends JavaScript's string conversion of node n of d: n below 0 gives "undefined"; null gives "null"; booleans give "true" or "false"; numbers give `num_str` of their value (`json::as_f64`); strings give their text (`json::text_of`); an array gives its elements joined by commas, a null element being empty and every other element converted the same way; an object gives "[object Object]".
+
+`to_num(d, n)` gives JavaScript's Number() of node n of d: n below 0 gives NaN; null gives 0; false 0 and true 1; numbers their value; strings `str_to_num` of the text; an array or object `str_to_num` of its `to_str` text.
+
+`or_text(out, d, n, alt)` appends what JavaScript's n or alt gives as text: `to_str` of n when `truthy` of n, otherwise the text alt.
+
+`cut_chars(s, count)` gives the first count characters of the text s as a view: a character is a UTF-8 lead byte with its continuation bytes (bytes from 0x80 to 0xBF belong to the character before them), the whole of s is given when it has no more than count characters, and a character is never split.
+
+`stringify(out, d, n, pretty, level)` appends what JavaScript's JSON.stringify gives for the node n of d, with two spaces of indent per level when pretty is true and no whitespace at all otherwise; level is the current depth, 0 at the top. An n below 0 stands for an empty object. Null gives "null" and booleans "true" or "false". A number gives "null" when it is infinite and `num_str` of it otherwise. A string gives `json::format_string` of its text. An empty array gives "[]" and an empty object "{}". A non-empty array gives "[", its elements each written by `stringify` at level plus 1, and "]"; elements are separated by a comma, and when pretty each element is preceded by a line feed and two spaces for each level plus 1, and the closing bracket by a line feed and two spaces for each level. An object is written the same way with braces, each member as the name through `json::format_string`, a colon (followed by a space when pretty) and the value. The members written are the distinct names of the object, once each, with the value of the last member of that name (`fld`). Their order is JavaScript's property order: first the names that are array indexes, in increasing numeric order, then every other name in the order of its first appearance among the members. A name is an array index when it is "0", or when its first byte is 1 to 9 and all its bytes are ASCII digits, it has at most 10 bytes and its value is at most 4294967294.
+
+`icon_of(out, d, tn)` appends the default icon text for the node tn of d: take `to_str` of tn as the name; the icon is IC_WEATHER for "weather", IC_SYSTEM for "system", IC_TIME for "time", IC_NEWS for "news", IC_STOCK for "stock", IC_CODE for "code", IC_FILE for "file", IC_GIT for "git", IC_DISK for "disk", IC_WATCH for "watch", IC_ERROR for "error", IC_INFO for "info" and IC_OTHER for every other name.
+
+`esc_or(out, d, n, alt)` appends `esc_html` of `or_text` of n with alt.
+
+`esc_cut(out, d, n, count)` appends `esc_html` of the first count characters (`cut_chars`) of the `or_text` of n with an empty alt.
+
+`round_text(out, d, n)` appends "?" when n is below 0 or null, and otherwise `num_str` of `js_round` of `to_num` of n.
+
+`base_name(s)` gives the part of s after the last slash, and of that the part after the last two-backslash separator, found by scanning left to right without overlap (so of three backslashes the first two are the separator and the third stays in the name); each part is a view of s, and when there is no separator the whole is kept.
+
+`stock_row(out, d, q)` appends the row HTML for the quote node q: let chg be the member "change" of q (`fld`) when it is `truthy` and none otherwise, let pct likewise for "change_pct", up be true when chg is none or `to_num` of chg is at least 0. Append ST_1, `esc_or` of "symbol" with "?", ST_2, then when "price" is not missing and not null `to_fixed` of its `to_num` with 2 decimals and otherwise "?", ST_3, "up" or "down" by up, Q_GT, IC_STOCK when up and AR_DOWN otherwise, a space, then `to_fixed` of `to_num` of pct (0 when none) with 2 decimals, and ST_4.
+
+`widget_body(body, d, tn, dn)` appends the body HTML for the type node tn of document d and the data node dn (-1 means an empty object). The kind is the text of tn when tn is a string and otherwise empty (non-string types always use the last rule). All fields below are members of dn read with `fld`. Weather: WX_1, `round_text` of "temp_c", WX_2, `esc_or` of "description" with an empty alt, DOT, `esc_or` of "location" with an empty alt, WX_3, `round_text` of "high_c", WX_4, `round_text` of "low_c", WX_5, `or_text` of "humidity_pct" with "?" (not escaped), WX_6. System: SY_GRID; then for each of "cpu_pct", "mem_pct" and "disk_pct" that is not missing and not null, in that order, the matching SY_CPU, SY_MEM or SY_DISK, `to_str` of the value (not escaped) and SY_PCT; then when "gpu_name" is `truthy`, SY_GPU, `esc_cut` of it with 18 characters and W_END; then DIV_END. Time: TM_1, `esc_or` of the first truthy of "time_human" and "iso" with "?" (when neither is truthy the text "?"), TM_2, `esc_or` of "weekday" with an empty alt, DOT, `esc_or` of "date_human" with an empty alt, DOT, `esc_or` of "tz" with an empty alt, DIV_END. News: when "items" is an array, then for each of its first 5 elements (each an item node) append A_1, `esc_or` of its "url" with "#", A_2, `esc_cut` of its "title" with 140 characters, NW_SRC, `esc_cut` of its "source" with 30 characters, SPAN_END and A_END; a missing or falsy "items" gives nothing. Stock: when "quotes" is an array, `stock_row` for each element in order. Git: GT_1, `esc_or` of "branch" with "?", GT_2, `or_text` of "dirty_n" with "0", GT_3, `or_text` of "ahead" with "0", GT_4, `or_text` of "behind" with "0", DIV_END; then build the commits text, which is `esc_or` with an empty alt of each element of the array "recent_commits" (none when missing or falsy), joined by "<br>", and when that text is not empty append GT_5, it, and DIV_END. File: FL_1, `esc_html` of `base_name` of the text that `or_text` of "path" with an empty alt appends to a scratch buffer, DOT, `or_text` of "lines_shown" with "0", FL_2, `num_str` of `js_round` of the quotient of that number and 1024, where that number is `to_num` of "size_bytes" when it is truthy and 0 otherwise, FL_3, `esc_cut` of "preview" with 1500 characters, PRE_END. Code: CD_1, `esc_or` of "code" with an empty alt, PRE_END. Error and info: `esc_html` of the "message" when truthy; otherwise the first 300 characters (`cut_chars`) of `stringify` of dn, compact, escaped by `esc_html`. Every other kind: FB_1, `esc_html` of the first 500 characters of `stringify` of dn with pretty true at level 0, PRE_END.
+
+`widget(out, d, n)` appends the HTML of the widget json node n of document d, or nothing. Nothing is appended unless n is an object whose member "type" (the last one, via `fld`) is `truthy`; call that node tn. Let tw be the member "title", ic the member "icon" and dn the member "data" when `truthy` and -1 otherwise. Append W_OPEN_1, `to_str` of tn (not escaped), Q_GT, W_HEAD_1, the icon, W_HEAD_2, the title, W_HEAD_3, W_BODY, `widget_body`, W_END. The title is `esc_html` of `to_str` of tw when tw is `truthy` and of tn otherwise. The icon is `esc_html` of `to_str` of ic when ic is `truthy` and otherwise `esc_html` of `icon_of` of tn.

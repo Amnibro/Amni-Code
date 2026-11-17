@@ -95,6 +95,24 @@ pub fn prompt_tools_system(tools: &[Value]) -> String {
 
 /// Parse tool calls written as text: `<tool_call>{json}</tool_call>` (Hermes/Qwen style) and
 /// `<tool_call><function=NAME><parameter=K>V</parameter></function></tool_call>` (Granite 4.2 / qwen3_coder style).
+pub fn lenient_json(s: &str) -> Option<Value> {
+    serde_json::from_str::<Value>(s).ok().or_else(|| {
+        let (mut out, mut q, mut esc) = (String::with_capacity(s.len() + 16), false, false);
+        for c in s.chars() {
+            match (q, esc, c) {
+                (true, true, _) => { esc = false; out.push(c) }
+                (true, false, '\\') => { esc = true; out.push(c) }
+                (true, false, '"') => { q = false; out.push(c) }
+                (true, false, '\n') => out.push_str("\\n"),
+                (true, false, '\r') => out.push_str("\\r"),
+                (true, false, '\t') => out.push_str("\\t"),
+                (false, _, '"') => { q = true; out.push(c) }
+                _ => out.push(c),
+            }
+        }
+        serde_json::from_str::<Value>(&out).ok()
+    })
+}
 pub fn parse_text_tool_calls(content: &str) -> Vec<(String, Value)> {
     let mut out = Vec::new();
     let re_block = regex::Regex::new(r"(?s)<tool_call>(.*?)(?:</tool_call>|$)").unwrap();
@@ -113,10 +131,10 @@ pub fn parse_text_tool_calls(content: &str) -> Vec<(String, Value)> {
             continue;
         }
         let jtxt = inner.trim_start_matches("```json").trim_start_matches("```").trim_end_matches("```").trim();
-        if let Ok(v) = serde_json::from_str::<Value>(jtxt) {
+        if let Some(v) = lenient_json(jtxt) {
             if let Some(name) = v["name"].as_str() {
                 let args = match &v["arguments"] {
-                    Value::String(s) => serde_json::from_str(s).unwrap_or(json!({})),
+                    Value::String(s) => lenient_json(s).unwrap_or(json!({})),
                     Value::Null => v.get("parameters").cloned().unwrap_or(json!({})),
                     a => a.clone(),
                 };
@@ -542,6 +560,11 @@ mod tests {
         assert_eq!(calls[0].2["path"], "b");
         assert_eq!(msg["content"], "Let me look.");
         assert!(parse_text_tool_calls("no tools here").is_empty());
+        let l = parse_text_tool_calls("<tool_call>\n{\"arguments\":{\"content\":\"def f():\n\treturn \\\"a\\\"\n\",\"path\":\"a.py\"},\"name\":\"write_file\"}\n</tool_call>");
+        assert_eq!(l, vec![("write_file".to_string(), json!({"content":"def f():\n\treturn \"a\"\n","path":"a.py"}))]);
+        let s = parse_text_tool_calls("<tool_call>{\"name\":\"run_command\",\"arguments\":\"{\\\"command\\\":\\\"ls\n-la\\\"}\"}</tool_call>");
+        assert_eq!(s[0].1["command"], "ls\n-la");
+        assert!(lenient_json("{\"a\": 1,}").is_none());
     }
     #[test]
     fn prompt_mode_rewrites_history() {

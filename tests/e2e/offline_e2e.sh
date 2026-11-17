@@ -22,7 +22,7 @@ trap 'kill $P1 $P2 ${P3:-} 2>/dev/null || true' EXIT
 for i in $(seq 1 50); do curl -s -o /dev/null http://127.0.0.1:11434/api/tags && curl -s -o /dev/null http://127.0.0.1:7700/v1/models && break; sleep 0.1; done
 START=$(date +%s%N)
 ( cd "$WORK/ws" && HOME="$WORK/home" HTTPS_PROXY=http://127.0.0.1:9 HTTP_PROXY=http://127.0.0.1:9 NO_PROXY=127.0.0.1,localhost \
-  AMNI_CODE_PORT=3199 AMNI_CODE_HOST=127.0.0.1 "$BIN" --serve --offline "$WORK/ws" > "$WORK/amni.log" 2>&1 ) & P3=$!
+  AMNI_CODE_PORT=3199 AMNI_CODE_HOST=127.0.0.1 exec "$BIN" --serve --offline "$WORK/ws" > "$WORK/amni.log" 2>&1 ) & P3=$!
 for i in $(seq 1 50); do curl -s -o /dev/null http://127.0.0.1:3199/health && break; sleep 0.2; done
 echo "startup: $(( ($(date +%s%N) - START) / 1000000 )) ms"
 grep -E "Offline mode|Local model server" "$WORK/amni.log" || true

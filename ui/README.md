@@ -12,14 +12,14 @@ cd ui && gold build <module>.gold
 $GOLD_HC build --web app.he -o ../static/ui.wasm
 ```
 
-The UI needs a Helium `hc/lib` with streaming fetch (`web::stream`, `EV_CHUNK`, `web::fetch_abort`), which is on the helium branch `rikku/web-stream` until it is merged. The `gold pack` lines run once: feature modules name `use core` and `use md` in their Gold headers, and Gold resolves those as packs. `app.gold` and `editor.gold` import the modules through an `he` fence instead.
+The UI needs a Helium `hc/lib` with streaming fetch (`web::stream`, `EV_CHUNK`, `web::fetch_abort`), which is on helium `main`. The `gold pack` lines run once: feature modules name `use core` and `use md` in their Gold headers, and Gold resolves those as packs. `app.gold` and `editor.gold` import the modules through an `he` fence instead.
 
 `hc build --web` also writes `helium.js` beside the wasm. `static/start.js`, `static/helium.js` and `static/ui.wasm` are committed and embedded by `src/main.rs`, so `cargo build` does not need the Helium toolchain.
 
 ## Tests
 
 - `tests/e2e/offline_e2e.sh target/debug/amni`: two agent turns against local stub servers in a loopback-only network namespace, then `tests/e2e/ui_click.js` clicks through skin, tone, settings, language, history, editor, palette, quick open, panes and shortcuts. Both fail on any page error or non-loopback request.
-- `ui/test/md_oracle.mjs` + `md_run.he`: byte-for-byte markdown parity (1940 cases) against the original JS renderer, read from the pre-port commit `f4957f7f6d77`.
+- `ui/test/md_oracle.mjs` + `md_run.he`: byte-for-byte markdown parity (1940 cases) against the original JS renderer, read from the pre-port commit `a4487952872e`.
 - `ui/test/settings_run.mjs`, `picker_smoke.mjs`, `look_panes_smoke.mjs`, `chat_smoke.mjs`, `editor_driver.mjs editor_cases.mjs`: per-module headless runs against stub servers.
 - `tests/test_*.py`: source checks on the markup, `ui/data/*.json` and the generated Helium.
 

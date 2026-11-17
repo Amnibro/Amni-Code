@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { execSync } from 'node:child_process';
 const here = path.dirname(fileURLToPath(import.meta.url));
 const casesPath = process.argv[4] || path.join(here, 'md_cases.txt');
-const html = process.env.MD_ORACLE_HTML ? fs.readFileSync(process.env.MD_ORACLE_HTML, 'utf8') : execSync('git show f4957f7f6d77:static/index.html', { cwd: here, encoding: 'utf8', maxBuffer: 1 << 26 });
+const html = process.env.MD_ORACLE_HTML ? fs.readFileSync(process.env.MD_ORACLE_HTML, 'utf8') : execSync('git show a4487952872e:static/index.html', { cwd: here, encoding: 'utf8', maxBuffer: 1 << 26 });
 const grab = (start, stop) => { const a = html.indexOf(start); return html.slice(a, html.indexOf(stop, a) + stop.length) };
 const core = grab('function escHtml(', '\nfunction addMsg(').slice(0, -'function addMsg('.length - 1);
 const diffSrc = grab('function renderDiffLine(', '\n}\n');

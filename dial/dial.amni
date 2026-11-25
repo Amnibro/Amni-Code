@@ -198,7 +198,8 @@ fn send() {
 	append_file(str(d, "/log.jsonl")[..], line[..]);
 	write_file(str(d, "/busy")[..], "1");
 	S[CUR].busy = true;
-	run_command(str("(", ENVP, cmd(CUR)[..], " >> '", d, "/log.jsonl' 2>> '", d, "/err.log'; rm -f '", d, "/busy') >/dev/null 2>&1 &")[..]);
+	write_file(str(d, "/run.sh")[..], str(ENVP, cmd(CUR)[..], " >> '", d, "/log.jsonl' 2>> '", d, "/err.log'; rm -f '", d, "/busy'\n")[..]);
+	run_command(str("if command -v setsid >/dev/null; then setsid -f sh '", d, "/run.sh'; else (sh '", d, "/run.sh' &); fi >/dev/null 2>&1 </dev/null")[..]);
 	INPUT.clear();
 	VIEW = 0;
 	refresh(CUR);

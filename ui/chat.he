@@ -22,6 +22,9 @@ T_CONFIRM_CLEAR i32 := 116
 T_COPY_RESET i32 := 117
 T_FMT i32 := 118
 T_TIME i32 := 119
+T_BOOT i32 := 120
+T_APPROVE i32 := 121
+T_RESET i32 := 122
 var session byte[>..]
 var current_id int = 0
 var new_title byte[>..]
@@ -595,6 +598,7 @@ new_chat():
 	current_id = 0
 	new_title.clear()
 	web::html(web::el("messages"), "")
+	web::request("/api/session/reset", "POST", "{\"Content-Type\":\"application/json\"}", "{}", T_RESET, 0.0)
 	web::js_call(web::js_global("location"), "reload", "[]", T_IGNORE);
 show_history():
 	render_history()
@@ -723,6 +727,101 @@ clear_history_go():
 	web::store_set("amniHistory", "[]")
 	new_chat()
 	render_history();
+
+show_approval(d json::Doc&, n int):
+	rid := str_of(d, n, "request_id")
+	tool := str_of(d, n, "tool")
+	sum := str_of(d, n, "summary")
+	w i32 := web::el("welcome")
+	if w != 0:
+		web::remove(w)
+		web::release(w)
+	html byte[>..] ~= []
+	html.append("<div class='approve-banner' data-rid='")
+	md::esc_html(html, rid)
+	html.append("'><div><strong>Allow ")
+	md::esc_html(html, tool)
+	html.append("?</strong><div class='approve-sum'>")
+	md::esc_html(html, sum)
+	html.append("</div></div><div class='approve-actions'><button data-act='chat.approve' data-arg='")
+	md::esc_html(html, rid)
+	html.append("'>Approve</button><button data-act='chat.deny' data-arg='")
+	md::esc_html(html, rid)
+	html.append("'>Deny</button></div></div>")
+	d2 i32 := web::create("div")
+	web::attr(d2, "class", "msg system")
+	web::html(d2, html)
+	web::append(web::el("messages"), d2)
+	web::release(d2)
+	scroll_down();
+send_approve(rid const byte[:], allow bool):
+	if rid.len == 0 || session.len == 0: return
+	b byte[>..] ~= []
+	b.append("{")
+	json::format_key(b, "session_id")
+	json::format_string(b, session)
+	b.append(",")
+	json::format_key(b, "request_id")
+	json::format_string(b, rid)
+	b.append(",")
+	json::format_key(b, "allow")
+	if allow: b.append("true")
+	else: b.append("false")
+	b.append("}")
+	web::request("/api/approve", "POST", "{\"Content-Type\":\"application/json\"}", b, T_APPROVE, 0.0)
+	mark_approval(rid, allow);
+mark_approval(rid const byte[:], allow bool):
+	m i32 := web::el("messages")
+	n int := web::query_all(m, ".approve-banner")
+	for i n:
+		h i32 := web::list_at(i as i32)
+		a byte[>..] ~= []
+		if web::get_attr(h, "data-rid", a) && a == rid:
+			web::html(h, if allow { "<strong>Approved.</strong>" } else { "<strong>Denied.</strong>" })
+		web::release(h);
+resume_from_session():
+	p byte[>..] ~= []
+	if web::get_attr(web::BODY, "data-panel", p) && p.len > 0: return
+	web::fetch("/api/session", T_BOOT);
+on_boot():
+	buf byte[>..] ~= []
+	web::fetch_take(web::ev_id(), buf)
+	web::fetch_free(web::ev_id())
+	d json::Doc ~= default<json::Doc>()
+	root, err := json::parse(buf, d)
+	if root < 0:
+		resume_local()
+		return
+	ch := json::member(d, root, "chat")
+	if ch < 0:
+		resume_local()
+		return
+	sidn := json::member(d, ch, "session_id")
+	sid, sok := json::as_string(d, sidn)
+	arr := json::member(d, ch, "messages")
+	n := if arr >= 0 { json::count(d, arr) } else { 0 }
+	if n == 0:
+		resume_local()
+		return
+	session.clear()
+	if sok: session.append(sid)
+	if current_id == 0: current_id = (web::epoch_ms()) as int
+	for j n:
+		e := json::element(d, arr, j)
+		role := str_of(d, e, "role")
+		content := str_of(d, e, "content")
+		tools byte[>..] ~= []
+		tm := json::member(d, e, "tools")
+		if tm >= 0: json::format_node(tools, d, tm)
+		if role.len > 0: add_msg(role, content, tools, "");
+resume_local():
+	root := hist_load()
+	if root < 0: return
+	if json::count(hd, root) == 0: return
+	e := json::element(hd, root, 0)
+	id := int_of(hd, e, "id")
+	if id != 0: load_chat(id);
+
 post_json(url const byte[:], tag i32, body const byte[:]) i32:
 	return web::request(url, "POST", "{\"Content-Type\":\"application/json\"}", body, tag, 0)
 session_body(out byte[>..]&):
@@ -774,6 +873,8 @@ handle_sse(name const byte[:], data const byte[:]) bool:
 		end_turn()
 		stop_stream()
 		return false
+	else if name == "approval":
+		show_approval(ed, r)
 	return true
 end_turn():
 	set_generating(false)
@@ -1028,7 +1129,8 @@ init():
 	b.append("[{\"$h\":")
 	format(b, h)
 	b.append("},[[],{\"year\":\"numeric\",\"month\":\"numeric\",\"day\":\"numeric\",\"hour\":\"numeric\",\"minute\":\"numeric\",\"second\":\"numeric\"}]]")
-	web::js_call(web::js_global("Reflect"), "construct", b, T_FMT);
+	web::js_call(web::js_global("Reflect"), "construct", b, T_FMT)
+	resume_from_session();
 event(tag i32, kind i32):
 	if tag == T_INPUT:
 		auto_resize()
@@ -1076,6 +1178,10 @@ event(tag i32, kind i32):
 		fill_times()
 	else if tag == T_TIME:
 		on_time()
+	else if tag == T_BOOT:
+		if kind == web::EV_FETCH: on_boot()
+	else if tag == T_APPROVE || tag == T_RESET:
+		if kind == web::EV_FETCH: web::fetch_free(web::ev_id())
 	return
 act(verb const byte[:], arg const byte[:]):
 	if verb == "fill":
@@ -1106,4 +1212,8 @@ act(verb const byte[:], arg const byte[:]):
 	else if verb == "parse_diff":
 		r, err := json::parse(arg, pd)
 		if r >= 0: diff_from_tool(pd, r)
+	else if verb == "approve":
+		send_approve(arg, true)
+	else if verb == "deny":
+		send_approve(arg, false)
 	return

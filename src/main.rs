@@ -1,5 +1,6 @@
 mod cli_seats;
 mod providers;
+mod parity;
 use axum::{extract::{Query,State},http::{header,HeaderValue,StatusCode},response::{sse::{Event as SseEvent,KeepAlive,Sse},Html,IntoResponse,Json,Response},routing::{get,post},Router};use futures::StreamExt;use serde::{Deserialize,Serialize};use std::{collections::HashMap,convert::Infallible,path::{Path,PathBuf},process::Stdio,sync::{Arc,atomic::AtomicBool}};use tokio::sync::{Mutex,broadcast};use tokio_stream::wrappers::ReceiverStream;use tower_http::cors::CorsLayer;
 #[derive(Clone, Default, Serialize)]
 struct DownloadProgress {
@@ -10,7 +11,7 @@ struct DownloadProgress {
     done: bool,
     error: String,
 }
-#[derive(Clone)]struct App{sessions:Arc<Mutex<HashMap<String,Session>>>,config:Arc<Mutex<Config>>,cwd:Arc<Mutex<PathBuf>>,dl_progress:Arc<Mutex<DownloadProgress>>,backups:Arc<Mutex<HashMap<String,Vec<(String,Option<String>)>>>>,interrupts:Arc<Mutex<HashMap<String,Arc<AtomicBool>>>>,amni_proc:Arc<Mutex<Option<tokio::process::Child>>>,server_log_tx:Arc<broadcast::Sender<String>>,memory:Arc<Mutex<HashMap<String,Vec<String>>>>,fs_tx:Arc<broadcast::Sender<String>>,checkpoints:Arc<Mutex<HashMap<String,Vec<Checkpoint>>>>}
+#[derive(Clone)]struct App{sessions:Arc<Mutex<HashMap<String,Session>>>,config:Arc<Mutex<Config>>,cwd:Arc<Mutex<PathBuf>>,dl_progress:Arc<Mutex<DownloadProgress>>,backups:Arc<Mutex<HashMap<String,Vec<(String,Option<String>)>>>>,interrupts:Arc<Mutex<HashMap<String,Arc<AtomicBool>>>>,amni_proc:Arc<Mutex<Option<tokio::process::Child>>>,server_log_tx:Arc<broadcast::Sender<String>>,memory:Arc<Mutex<HashMap<String,Vec<String>>>>,fs_tx:Arc<broadcast::Sender<String>>,checkpoints:Arc<Mutex<HashMap<String,Vec<Checkpoint>>>>,parity:Arc<Mutex<parity::State>>}
 #[derive(Clone,Default)]struct Session{messages:Vec<serde_json::Value>,working_dir:String}
 #[derive(Clone, Serialize, Deserialize)]
 struct Config {
@@ -29,6 +30,8 @@ struct Config {
     offline: bool,
     #[serde(default)]
     tool_mode: String,
+    #[serde(default)]
+    code_mode: bool,
 }
 impl Default for Config {
     fn default() -> Self {
@@ -65,6 +68,7 @@ impl Default for Config {
             mcp_servers: Vec::new(),
             offline: env_offline(),
             tool_mode: String::new(),
+            code_mode: false,
         }
     }
 }
@@ -147,6 +151,7 @@ struct ConfigReq {
     model_dir: Option<String>,
     offline: Option<bool>,
     tool_mode: Option<String>,
+    code_mode: Option<bool>,
 }
 #[derive(Serialize)]
 struct ModelsRes {
@@ -1000,6 +1005,10 @@ enum SlashCmd {
     SetMode(&'static str),
     Prompt(String),
     Help,
+    Ship(String),
+    Tasks,
+    Doctor,
+    CodeMode,
 }
 fn parse_slash(input: &str) -> Option<SlashCmd> {
     let rest = input.trim().strip_prefix('/')?;
@@ -1024,10 +1033,14 @@ fn parse_slash(input: &str) -> Option<SlashCmd> {
         "edit" => Some(SlashCmd::SetMode("edit")),
         "auto" | "autonomous" => Some(SlashCmd::SetMode("autonomous")),
         "help" | "?" => Some(SlashCmd::Help),
+        "ship" => Some(SlashCmd::Ship(arg.to_string())),
+        "tasks" => Some(SlashCmd::Tasks),
+        "doctor" => Some(SlashCmd::Doctor),
+        "code" | "code-mode" => Some(SlashCmd::CodeMode),
         _ => None,
     }
 }
-const SLASH_HELP: &str = "**Slash commands:**\n- `/test [cmd]` - run the test suite (auto-detected)\n- `/status` - git status\n- `/diff [path]` - git diff\n- `/log` - recent commits\n- `/commit [msg]` - review + stage + commit\n- `/review [path]` - code review of changes or a path\n- `/plan` `/edit` `/auto` - switch agent mode\n- `/help` - this list";
+const SLASH_HELP: &str = "**Slash commands:**\n- `/test [cmd]` - run the test suite (auto-detected)\n- `/status` - git status\n- `/diff [path]` - git diff\n- `/log` - recent commits\n- `/commit [msg]` - review + stage + commit\n- `/review [path]` - code review of changes or a path\n- `/ship [msg]` - review, fix real bugs, commit; push and open a PR only in private repos; monitor checks until the session closes\n- `/tasks` - background work, scheduled tasks, wakeups and forks\n- `/doctor` - list broken agent, skill, command and hook files\n- `/code` - toggle Code Mode (opt-in)\n- `/plan` `/edit` `/auto` - switch agent mode\n- `/help` - this list";
 enum SlashOutcome { NotSlash, Handled, Rewrite(String) }
 async fn handle_slash(app: &App, sid: &str, user_msg: &str, wd: &Option<String>, tx: &tokio::sync::mpsc::Sender<SseEvent>) -> SlashOutcome {
     let scmd = match parse_slash(user_msg) { Some(c) => c, None => return SlashOutcome::NotSlash };
@@ -1050,6 +1063,45 @@ async fn handle_slash(app: &App, sid: &str, user_msg: &str, wd: &Option<String>,
             let (output, status) = exec_tool(name, &args, &cwd_now).await;
             let _ = tx.send(SseEvent::default().event("tool_result").data(serde_json::json!({ "tool": name, "input": &args, "output": &output, "status": &status }).to_string())).await;
             let _ = tx.send(SseEvent::default().event("message").data(serde_json::json!({ "message": format!("`/{}` result:\n```\n{}\n```", name, output) }).to_string())).await;
+        }
+        SlashCmd::Ship(msg) => {
+            let cwd_now = session_cwd(app, sid, wd).await;
+            let log = parity::ship_commit_and_pr(&cwd_now, &msg);
+            if let Some(hint) = parity::local_test_hint(&cwd_now) {
+                let _ = tx.send(SseEvent::default().event("message").data(serde_json::json!({ "message": format!("`/ship` git:\n```\n{log}```\nRunning local checks: `{hint}`") }).to_string())).await;
+                let (out, st) = exec_tool("run_tests", &serde_json::json!({}), &cwd_now).await;
+                let _ = tx.send(SseEvent::default().event("tool_result").data(serde_json::json!({ "tool": "run_tests", "output": &out, "status": &st }).to_string())).await;
+            } else {
+                let _ = tx.send(SseEvent::default().event("message").data(serde_json::json!({ "message": format!("`/ship` git:\n```\n{log}```") }).to_string())).await;
+            }
+            let id = { let mut st = app.parity.lock().await; parity::add_task(&mut st, "background", "ship monitor", "watching PR, comments, conflicts and checks") };
+            let app2 = app.clone();
+            let cwd2 = cwd_now.clone();
+            let id2 = id.clone();
+            tokio::spawn(async move {
+                loop {
+                    tokio::time::sleep(tokio::time::Duration::from_secs(parity::POLL_SECS)).await;
+                    let running = app2.parity.lock().await.tasks.iter().any(|t| t.id == id2 && t.status == "running");
+                    if !running { break; }
+                    let detail = parity::pr_monitor_once(&cwd2);
+                    if let Some(t) = app2.parity.lock().await.tasks.iter_mut().find(|t| t.id == id2) { t.detail = detail; }
+                }
+            });
+            return SlashOutcome::Rewrite(parity::ship_prompt(&msg));
+        }
+        SlashCmd::Tasks => {
+            let st = app.parity.lock().await;
+            let body = serde_json::to_string_pretty(&parity::tasks_json(&st)).unwrap_or_else(|_| "{}".into());
+            let _ = tx.send(SseEvent::default().event("message").data(serde_json::json!({ "message": format!("**Tasks**\n```json\n{body}\n```") }).to_string())).await;
+        }
+        SlashCmd::Doctor => {
+            let rep = parity::doctor_report();
+            let body = serde_json::to_string_pretty(&rep).unwrap_or_else(|_| "{}".into());
+            let _ = tx.send(SseEvent::default().event("message").data(serde_json::json!({ "message": format!("**Doctor**\n```json\n{body}\n```") }).to_string())).await;
+        }
+        SlashCmd::CodeMode => {
+            let on = { let mut c = app.config.lock().await; c.code_mode = !c.code_mode; persist_config(&c.clone()); c.code_mode };
+            let _ = tx.send(SseEvent::default().event("message").data(serde_json::json!({ "message": if on { "Code Mode is **on**. The model may write one script of tool calls (limit 70 steps, loop limit 7)." } else { "Code Mode is **off**." } }).to_string())).await;
         }
         SlashCmd::Prompt(_) => {}
     }
@@ -1104,9 +1156,9 @@ async fn resolve_mentions(user_msg: &str, cwd: &PathBuf) -> Option<String> {
     }
     if added == 0 { None } else { Some(format!("{}{}", ctx, user_msg)) }
 }
-async fn agent_loop_stream(app:App,sid:String,mut user_msg:String,wd:Option<String>,tx:tokio::sync::mpsc::Sender<SseEvent>){match handle_slash(&app,&sid,&user_msg,&wd,&tx).await{SlashOutcome::Handled=>return,SlashOutcome::Rewrite(p)=>user_msg=p,SlashOutcome::NotSlash=>{}}{let __mcwd=session_cwd(&app,&sid,&wd).await;if let Some(__ex)=resolve_mentions(&user_msg,&__mcwd).await{user_msg=__ex;}}let config=app.config.lock().await.clone();ensure_model_loaded(&config).await;let cwd=app.cwd.lock().await.clone();let cwd_path=if let Some(s)=app.sessions.lock().await.get(&sid){if!s.working_dir.is_empty(){PathBuf::from(&s.working_dir)}else{cwd.clone()}}else{wd.as_ref().map_or(cwd.clone(),|w|PathBuf::from(w))};if is_codebase_explain(&user_msg){let snap=seed_codebase_snapshot(&cwd_path).await;if snap.len()>40{user_msg=format!("{user_msg}\n\n{snap}");}}{let mut sessions=app.sessions.lock().await;let session=sessions.entry(sid.clone()).or_default();if session.messages.is_empty(){let custom=load_custom_instructions(&cwd_path);let sys=SYSTEM_PROMPT.replace("{CWD}",&cwd_path.display().to_string()).replace("{CUSTOM_INSTRUCTIONS}",&custom);session.messages.push(serde_json::json!({"role":"system","content":sys}));if let Some(w)=wd{session.working_dir=w.clone();}}session.messages.push(serde_json::json!({"role":"user","content":&user_msg}));compact_context(&mut session.messages);}let interrupt_flag={let mut interrupts=app.interrupts.lock().await;let flag=interrupts.entry(sid.clone()).or_insert_with(||Arc::new(AtomicBool::new(false))).clone();flag.store(false,std::sync::atomic::Ordering::Relaxed);flag};
+async fn agent_loop_stream(app:App,sid:String,mut user_msg:String,wd:Option<String>,tx:tokio::sync::mpsc::Sender<SseEvent>){set_recent(&sid);match handle_slash(&app,&sid,&user_msg,&wd,&tx).await{SlashOutcome::Handled=>return,SlashOutcome::Rewrite(p)=>user_msg=p,SlashOutcome::NotSlash=>{}}{let __mcwd=session_cwd(&app,&sid,&wd).await;if let Some(__ex)=resolve_mentions(&user_msg,&__mcwd).await{user_msg=__ex;}}let config=app.config.lock().await.clone();ensure_model_loaded(&config).await;let cwd=app.cwd.lock().await.clone();let cwd_path=if let Some(s)=app.sessions.lock().await.get(&sid){if!s.working_dir.is_empty(){PathBuf::from(&s.working_dir)}else{cwd.clone()}}else{wd.as_ref().map_or(cwd.clone(),|w|PathBuf::from(w))};if is_codebase_explain(&user_msg){let snap=seed_codebase_snapshot(&cwd_path).await;if snap.len()>40{user_msg=format!("{user_msg}\n\n{snap}");}}{let mut sessions=app.sessions.lock().await;let session=sessions.entry(sid.clone()).or_default();if session.messages.is_empty(){let custom=load_custom_instructions(&cwd_path);let sys=SYSTEM_PROMPT.replace("{CWD}",&cwd_path.display().to_string()).replace("{CUSTOM_INSTRUCTIONS}",&custom);session.messages.push(serde_json::json!({"role":"system","content":sys}));if let Some(w)=wd{session.working_dir=w.clone();}}session.messages.push(serde_json::json!({"role":"user","content":&user_msg}));compact_context(&mut session.messages);if config.code_mode && !session.messages.iter().any(|m| m.get("content").and_then(|c| c.as_str()).unwrap_or("").contains("Code Mode is on")) { session.messages.push(serde_json::json!({"role":"system","content":parity::CODE_MODE_PROMPT})); } }let used_tok={let s=app.sessions.lock().await;s.get(&sid).map(|x|parity::estimate_tokens(&x.messages)).unwrap_or(0)};parity::set_usage(&mut *app.parity.lock().await, used_tok);let interrupt_flag={let mut interrupts=app.interrupts.lock().await;let flag=interrupts.entry(sid.clone()).or_insert_with(||Arc::new(AtomicBool::new(false))).clone();flag.store(false,std::sync::atomic::Ordering::Relaxed);flag};
 let _=tx.send(SseEvent::default().event("session").data(serde_json::json!({"session_id":&sid}).to_string())).await;
-if config.offline&&cli_seats::is_seat(&config.provider){let _=tx.send(SseEvent::default().event("error").data(serde_json::json!({"error":format!("Offline mode is on, so the subscription CLI '{}' (a cloud service) is disabled. Pick a local model with Ctrl+K, or turn Offline mode off.",config.provider)}).to_string())).await;let _=tx.send(SseEvent::default().event("done").data(serde_json::json!({"session_id":&sid}).to_string())).await;return;}if let Some(seat)=cli_seats::seat(&config.provider){let hist=app.sessions.lock().await.get(&sid).map(|s|s.messages.clone()).unwrap_or_default();let body=if seat.id=="claude-code"&&cli_seats::has_pin(&sid){user_msg.clone()}else{cli_seats::transcript_prefix(&hist,&user_msg)};match cli_seats::run(seat,&config.model,&config.mode,config.auto_approve,&cwd_path,&body,&sid,interrupt_flag.clone(),tx.clone()).await{Ok(text)=>{app.sessions.lock().await.entry(sid.clone()).or_default().messages.push(serde_json::json!({"role":"assistant","content":&text}));let _=tx.send(SseEvent::default().event("message").data(serde_json::json!({"message":&text}).to_string())).await;let _=tx.send(SseEvent::default().event("done").data(serde_json::json!({"session_id":&sid}).to_string())).await;}Err(e)=>{if e=="interrupted"{let _=tx.send(SseEvent::default().event("interrupted").data(serde_json::json!({"session_id":&sid}).to_string())).await;}else{let _=tx.send(SseEvent::default().event("error").data(serde_json::json!({"error":&e}).to_string())).await;}}}return;}let max_iters=std::env::var("AMNI_CODE_MAX_ITERS").ok().and_then(|v|v.parse::<u32>().ok()).unwrap_or(100);let mut it:u32=0;while it<max_iters{if interrupt_flag.load(std::sync::atomic::Ordering::Relaxed){let _=tx.send(SseEvent::default().event("interrupted").data(serde_json::json!({"session_id":&sid}).to_string())).await;return;}it+=1;let messages=app.sessions.lock().await.entry(sid.clone()).or_default().messages.clone();match llm_call(&config,&messages).await{Ok((raw_msg,tool_calls))=>{if let Some(widgets)=raw_msg.get("amni_widgets").and_then(|w|w.as_array()){for w in widgets{let _=tx.send(SseEvent::default().event("widget").data(w.to_string())).await;}}if tool_calls.is_empty(){let content=raw_msg["content"].as_str().unwrap_or("").to_string();app.sessions.lock().await.entry(sid.clone()).or_default().messages.push(raw_msg);let _=tx.send(SseEvent::default().event("message").data(serde_json::json!({"message":&content}).to_string())).await;let _=tx.send(SseEvent::default().event("done").data(serde_json::json!({"session_id":&sid}).to_string())).await;return;}
+if config.offline&&cli_seats::is_seat(&config.provider){let _=tx.send(SseEvent::default().event("error").data(serde_json::json!({"error":format!("Offline mode is on, so the subscription CLI '{}' (a cloud service) is disabled. Pick a local model with Ctrl+K, or turn Offline mode off.",config.provider)}).to_string())).await;let _=tx.send(SseEvent::default().event("done").data(serde_json::json!({"session_id":&sid}).to_string())).await;return;}if let Some(seat)=cli_seats::seat(&config.provider){let hist=app.sessions.lock().await.get(&sid).map(|s|s.messages.clone()).unwrap_or_default();let body=if seat.id=="claude-code"&&cli_seats::has_pin(&sid){user_msg.clone()}else{cli_seats::transcript_prefix(&hist,&user_msg)};match cli_seats::run(seat,&config.model,&config.mode,config.auto_approve,&cwd_path,&body,&sid,interrupt_flag.clone(),tx.clone()).await{Ok(text)=>{app.sessions.lock().await.entry(sid.clone()).or_default().messages.push(serde_json::json!({"role":"assistant","content":&text}));{let s=app.sessions.lock().await;if let Some(sess)=s.get(&sid){save_last_chat(&sid,&cwd_path,&sess.messages);}}let _=tx.send(SseEvent::default().event("message").data(serde_json::json!({"message":&text}).to_string())).await;let _=tx.send(SseEvent::default().event("done").data(serde_json::json!({"session_id":&sid}).to_string())).await;}Err(e)=>{if e=="interrupted"{let _=tx.send(SseEvent::default().event("interrupted").data(serde_json::json!({"session_id":&sid}).to_string())).await;}else{let _=tx.send(SseEvent::default().event("error").data(serde_json::json!({"error":&e}).to_string())).await;}}}return;}let max_iters=std::env::var("AMNI_CODE_MAX_ITERS").ok().and_then(|v|v.parse::<u32>().ok()).unwrap_or(100);let mut it:u32=0;while it<max_iters{if interrupt_flag.load(std::sync::atomic::Ordering::Relaxed){let _=tx.send(SseEvent::default().event("interrupted").data(serde_json::json!({"session_id":&sid}).to_string())).await;return;}it+=1;let messages=app.sessions.lock().await.entry(sid.clone()).or_default().messages.clone();match llm_call(&config,&messages).await{Ok((raw_msg,tool_calls))=>{if let Some(widgets)=raw_msg.get("amni_widgets").and_then(|w|w.as_array()){for w in widgets{let _=tx.send(SseEvent::default().event("widget").data(w.to_string())).await;}}if tool_calls.is_empty(){let content=raw_msg["content"].as_str().unwrap_or("").to_string();if config.code_mode{if let Some(script)=parity::extract_code_script(&content){match parity::run_code_steps(&script){Ok(steps)=>{app.parity.lock().await.code_script=Some(script.clone());let _=tx.send(SseEvent::default().event("code_script").data(script.to_string())).await;let cwd_now=cwd_path.clone();let mut repeats=std::collections::HashMap::<String,u32>::new();for step in steps{let tool=step.get("tool").and_then(|x|x.as_str()).unwrap_or("").to_string();let args=step.get("args").cloned().unwrap_or_else(||serde_json::json!({}));if tool.is_empty(){continue;}let key=format!("{tool}:{args}");let n=repeats.entry(key).or_insert(0);*n+=1;if *n>parity::LOOP_LIMIT{let _=tx.send(SseEvent::default().event("tool_result").data(serde_json::json!({"tool":&tool,"output":"runaway loop limit (7)","status":"error"}).to_string())).await;break;}let _=tx.send(SseEvent::default().event("tool_start").data(serde_json::json!({"tool":&tool,"input":&args,"code_mode":true}).to_string())).await;let (output,status)=exec_tool(&tool,&args,&cwd_now).await;let _=tx.send(SseEvent::default().event("tool_result").data(serde_json::json!({"tool":&tool,"input":&args,"output":&output,"status":&status,"code_mode":true}).to_string())).await;app.sessions.lock().await.entry(sid.clone()).or_default().messages.push(serde_json::json!({"role":"tool","content":output}));}app.sessions.lock().await.entry(sid.clone()).or_default().messages.push(raw_msg);continue;}Err(e)=>{let _=tx.send(SseEvent::default().event("error").data(serde_json::json!({"error":e}).to_string())).await;}}}}app.sessions.lock().await.entry(sid.clone()).or_default().messages.push(raw_msg);let _=tx.send(SseEvent::default().event("message").data(serde_json::json!({"message":&content}).to_string())).await;let _=tx.send(SseEvent::default().event("done").data(serde_json::json!({"session_id":&sid}).to_string())).await;return;}
                 app.sessions
                     .lock()
                     .await
@@ -1264,6 +1316,9 @@ async fn handle_config_set(State(app): State<App>, Json(req): Json<ConfigReq>) -
     }
     if let Some(v) = req.tool_mode {
         cfg.tool_mode = v;
+    }
+    if let Some(v) = req.code_mode {
+        cfg.code_mode = v;
     }
     normalize_config(&mut cfg);
     persist_config(&cfg);
@@ -2189,6 +2244,49 @@ async fn handle_hf_download(
 async fn handle_hf_progress(State(app): State<App>) -> Json<DownloadProgress> {
     Json(app.dl_progress.lock().await.clone())
 }
+
+fn recent_sid()->&'static std::sync::Mutex<Option<String>>{static S:std::sync::OnceLock<std::sync::Mutex<Option<String>>>=std::sync::OnceLock::new();S.get_or_init(||std::sync::Mutex::new(None))}
+fn set_recent(sid:&str){ *recent_sid().lock().unwrap()=Some(sid.to_string()); }
+async fn handle_session(State(app): State<App>) -> Json<serde_json::Value> {
+    let used = { let s = app.sessions.lock().await; s.values().map(|x| parity::estimate_tokens(&x.messages)).max().unwrap_or(0) };
+    let mut st = app.parity.lock().await;
+    if used > st.context_used { parity::set_usage(&mut st, used); }
+    let cm = app.config.lock().await.code_mode;
+    let mut v = parity::session_json(&st, cm);
+    drop(st);
+    let sid=recent_sid().lock().unwrap().clone();
+    let chat=if let Some(id)=sid{let s=app.sessions.lock().await;s.get(&id).map(|sess|chat_public(&id,&sess.messages))}else{None};
+    if let Some(obj)=v.as_object_mut(){obj.insert("chat".into(),chat.unwrap_or(serde_json::json!({"session_id":"","messages":[]})));}
+    Json(v)
+}
+#[derive(Deserialize)]struct ApproveReq{session_id:String,request_id:String,allow:bool}
+async fn handle_approve(Json(req):Json<ApproveReq>)->impl IntoResponse{match cli_seats::answer(&req.session_id,&req.request_id,req.allow).await{Ok(())=> (axum::http::StatusCode::OK, Json(serde_json::json!({"ok":true,"allow":req.allow})) ),Err(e)=> (axum::http::StatusCode::CONFLICT, Json(serde_json::json!({"ok":false,"error":e})) )}}
+async fn handle_session_reset()->Json<serde_json::Value>{*recent_sid().lock().unwrap()=None;clear_last_chat();Json(serde_json::json!({"ok":true}))}
+async fn handle_tasks(State(app): State<App>) -> Json<serde_json::Value> {
+    let mut st=app.parity.lock().await;
+    if st.tasks.is_empty()&&std::env::var("AMNI_CODE_SEED_TASK").is_ok(){parity::add_task(&mut st,"background","Watch local tests","seeded");}
+    Json(parity::tasks_json(&st))
+}
+#[derive(Deserialize)]
+struct StopTaskReq { id: String }
+async fn handle_task_stop(State(app): State<App>, Json(req): Json<StopTaskReq>) -> Json<serde_json::Value> {
+    let ok = parity::stop_task(&mut *app.parity.lock().await, &req.id);
+    Json(serde_json::json!({"ok": ok, "id": req.id}))
+}
+async fn handle_doctor() -> Json<serde_json::Value> { Json(parity::doctor_report()) }
+async fn handle_changes(State(app): State<App>) -> Json<serde_json::Value> {
+    let cwd = app.cwd.lock().await.clone();
+    Json(parity::changes_json(&cwd))
+}
+#[derive(Deserialize)]
+struct TermReq { cmd: String }
+async fn handle_term(State(app): State<App>, Json(req): Json<TermReq>) -> Json<serde_json::Value> {
+    let cwd = app.cwd.lock().await.clone();
+    let mut st = app.parity.lock().await;
+    let out = parity::run_term(&cwd, &req.cmd, &mut st.term_log);
+    Json(serde_json::json!({"output": out, "log": st.term_log}))
+}
+async fn serve_logo()->impl IntoResponse{_asset(include_bytes!("../static/amniscient-logo.png"),"image/png")}
 async fn handle_health() -> impl IntoResponse {
     Json(serde_json::json!({"ok":true,"status":"ok","version":env!("CARGO_PKG_VERSION"),"port":std::env::var("AMNI_CODE_PORT").ok().and_then(|s|s.parse::<u16>().ok()).unwrap_or(3030)}))
 }
@@ -2251,13 +2349,29 @@ async fn serve_ui_css()->impl IntoResponse{_asset(include_str!("../static/ui.css
 async fn serve_start_js()->impl IntoResponse{_asset(include_bytes!("../static/start.js"),"application/javascript; charset=utf-8")}
 async fn serve_helium_js()->impl IntoResponse{_asset(include_bytes!("../static/helium.js"),"application/javascript; charset=utf-8")}
 async fn serve_ui_wasm()->impl IntoResponse{_asset(include_bytes!("../static/ui.wasm"),"application/wasm")}
+
+fn usage()->&'static str{"Amni-Code — AI coding agent\n\nUsage: amni [OPTIONS] [DIR]\n\nOptions:\n  -h, --help        Show this help and exit\n  -V, --version     Show version and exit\n  --serve           Serve the UI over HTTP and do not open a desktop window\n  --no-window       Same as --serve\n  --headless        Same as --serve\n  --browser         Serve and open the system browser\n  --no-update       Skip the self-update git pull\n\nDIR, when it is a directory, is the working folder for the session.\n\nEnvironment: AMNI_CODE_PORT, AMNI_CODE_HOST, AMNI_CODE_PROVIDER, AMNI_NO_SELF_UPDATE\n"}
+const KNOWN_FLAGS:&[&str]=&["-h","--help","-V","--version","--serve","--no-window","--headless","--browser","--no-update"];
+#[derive(Debug,PartialEq)]enum Early{Run,Help,Version,Bad(String)}
+fn parse_early(args:&[String])->Early{if args.iter().any(|a|a=="-h"||a=="--help"){return Early::Help;}if args.iter().any(|a|a=="-V"||a=="--version"){return Early::Version;}for a in args.iter().skip(1){if a.starts_with('-')&&!KNOWN_FLAGS.iter().any(|f|*f==a){return Early::Bad(a.clone());}}Early::Run}
+fn has_upstream(dir:&std::path::Path)->bool{std::process::Command::new("git").args(["rev-parse","--abbrev-ref","--symbolic-full-name","@{u}"]).current_dir(dir).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).status().map(|s|s.success()).unwrap_or(false)}
+fn last_chat_path()->PathBuf{dirs::home_dir().unwrap_or_default().join(".amni").join("last-chat.json")}
+fn save_last_chat(sid:&str,cwd:&Path,messages:&[serde_json::Value]){let msgs:Vec<_>=messages.iter().filter(|m|matches!(m.get("role").and_then(|r|r.as_str()),Some("user")|Some("assistant")|Some("tool"))).cloned().collect();if msgs.is_empty(){return;}let v=serde_json::json!({"session_id":sid,"working_dir":cwd.display().to_string(),"messages":msgs});if let Some(d)=last_chat_path().parent(){let _=std::fs::create_dir_all(d);}let _=std::fs::write(last_chat_path(),v.to_string());}
+fn load_last_chat()->Option<(String,String,Vec<serde_json::Value>)>{let s=std::fs::read_to_string(last_chat_path()).ok()?;let v:serde_json::Value=serde_json::from_str(&s).ok()?;let sid=v.get("session_id")?.as_str()?.to_string();if sid.is_empty(){return None;}let cwd=v.get("working_dir").and_then(|x|x.as_str()).unwrap_or("").to_string();let msgs=v.get("messages")?.as_array()?.clone();Some((sid,cwd,msgs))}
+fn chat_public(sid:&str,messages:&[serde_json::Value])->serde_json::Value{let mut out=Vec::new();for m in messages{let role=m.get("role").and_then(|r|r.as_str()).unwrap_or("");let content=m.get("content").and_then(|c|c.as_str()).unwrap_or("");if role=="system"&&(content.starts_with("You are Amni-Code")||content.contains("Code Mode is on")){continue;}if role=="user"||role=="assistant"||role=="system"||role=="tool"{let mut o=serde_json::json!({"role":role,"content":content});if let Some(t)=m.get("tools"){o["tools"]=t.clone();}out.push(o);}}serde_json::json!({"session_id":sid,"messages":out})}
+fn clear_last_chat(){let _=std::fs::remove_file(last_chat_path());}
+fn open_desktop(ui_url:&str)->bool{if std::env::var("WAYLAND_DISPLAY").is_ok()&&std::env::var("DISPLAY").is_ok()&&std::env::var("WINIT_UNIX_BACKEND").is_err(){std::env::set_var("WINIT_UNIX_BACKEND","x11");}let url=ui_url.to_string();let hook=std::panic::take_hook();std::panic::set_hook(Box::new(|_|{}));let ok=std::panic::catch_unwind(std::panic::AssertUnwindSafe(||{use tao::event::{Event,WindowEvent};use tao::event_loop::{ControlFlow,EventLoop};use tao::window::WindowBuilder;use wry::WebViewBuilder;let event_loop=EventLoop::new();let window=WindowBuilder::new().with_title("Amni-Code — AI Coding Agent").with_inner_size(tao::dpi::LogicalSize::new(1200.0,800.0)).build(&event_loop).expect("window");let _webview=WebViewBuilder::new().with_url(&url).with_devtools(true).build(&window).expect("webview");event_loop.run(move|event,_,control_flow|{*control_flow=ControlFlow::Wait;if let Event::WindowEvent{event:WindowEvent::CloseRequested,..}=event{*control_flow=ControlFlow::Exit;}});})).is_ok();std::panic::set_hook(hook);ok}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    if std::env::args().nth(1).as_deref() == Some("dial") { let me = std::env::current_exe().ok().and_then(|e| e.parent().map(|d| d.join("amni-dial"))).filter(|p| p.is_file()).unwrap_or_else(|| "amni-dial".into()); std::process::exit(std::process::Command::new(me).args(std::env::args().skip(2)).status().map(|s| s.code().unwrap_or(1)).unwrap_or(127)); }
+    let args:Vec<String>=std::env::args().collect();
+    match parse_early(&args){Early::Help=>{print!("{}",usage());std::process::exit(0);}Early::Version=>{println!("Amni-Code {}",env!("CARGO_PKG_VERSION"));std::process::exit(0);}Early::Bad(f)=>{eprint!("unknown option: {f}\n\n{}",usage());std::process::exit(2);}Early::Run=>{}}
     tracing_subscriber::fmt::init();
     let cwd = std::env::current_dir().unwrap_or_default();
     let src_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
     let exe_path = std::env::current_exe().unwrap_or_default();
-    let no_update = env_offline() || std::env::var("AMNI_NO_SELF_UPDATE").is_ok() || std::env::args().any(|a| a == "--no-update" || a == "--serve" || a == "--no-window") || !src_dir.join(".git").exists();
+    let no_update = env_offline() || std::env::var("AMNI_NO_SELF_UPDATE").is_ok() || std::env::args().any(|a| a == "--no-update" || a == "--serve" || a == "--no-window") || !src_dir.join(".git").exists() || !has_upstream(src_dir);
     if !no_update {
         // Fail soft and fast: a git pull that cannot reach the network is killed after 5 s.
         let get_hash = |dir: &std::path::Path| std::process::Command::new("git").args(["rev-parse","HEAD"]).current_dir(dir).output().ok().map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string());
@@ -2330,7 +2444,9 @@ async fn main() -> anyhow::Result<()> {
     let (server_log_tx,_)=broadcast::channel::<String>(512);
     let (fs_tx,_)=broadcast::channel::<String>(256);
     if !config.mcp_servers.is_empty(){mcp_init(&config.mcp_servers).await;}
-    let app=App{sessions:Arc::new(Mutex::new(HashMap::new())),config:Arc::new(Mutex::new(config)),cwd:Arc::new(Mutex::new(effective_cwd.clone())),dl_progress:Arc::new(Mutex::new(DownloadProgress::default())),backups:Arc::new(Mutex::new(HashMap::new())),interrupts:Arc::new(Mutex::new(HashMap::new())),amni_proc:Arc::new(Mutex::new(None)),server_log_tx:Arc::new(server_log_tx),memory:Arc::new(Mutex::new(memory)),fs_tx:Arc::new(fs_tx.clone()),checkpoints:Arc::new(Mutex::new(HashMap::new()))};
+    let app=App{sessions:Arc::new(Mutex::new(HashMap::new())),config:Arc::new(Mutex::new(config)),cwd:Arc::new(Mutex::new(effective_cwd.clone())),dl_progress:Arc::new(Mutex::new(DownloadProgress::default())),backups:Arc::new(Mutex::new(HashMap::new())),interrupts:Arc::new(Mutex::new(HashMap::new())),amni_proc:Arc::new(Mutex::new(None)),server_log_tx:Arc::new(server_log_tx),memory:Arc::new(Mutex::new(memory)),fs_tx:Arc::new(fs_tx.clone()),checkpoints:Arc::new(Mutex::new(HashMap::new())),parity:parity::new_state()};
+    if let Some((sid,wd,msgs))=load_last_chat(){let mut sess=Session::default();sess.working_dir=wd;sess.messages=msgs;set_recent(&sid);app.sessions.lock().await.insert(sid,sess);}
+
     // File watcher — polls for changes every 2s and broadcasts via fs_tx
     let watch_dir = effective_cwd.clone();
     let fs_tx_clone = fs_tx.clone();
@@ -2408,6 +2524,15 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/providers", get(handle_providers))
         .route("/api/local-servers", get(handle_local_servers))
         .route("/health", get(handle_health))
+        .route("/api/session", get(handle_session))
+        .route("/api/session/reset", post(handle_session_reset))
+        .route("/api/approve", post(handle_approve))
+        .route("/api/tasks", get(handle_tasks))
+        .route("/api/tasks/stop", post(handle_task_stop))
+        .route("/api/doctor", get(handle_doctor))
+        .route("/api/changes", get(handle_changes))
+        .route("/api/term", post(handle_term))
+        .route("/assets/amniscient-logo.png", get(serve_logo))
         .layer(CorsLayer::permissive())
         .with_state(app);
     let serve_only = std::env::args().any(|a| a == "--serve" || a == "--no-window" || a == "--headless");
@@ -2434,31 +2559,11 @@ async fn main() -> anyhow::Result<()> {
             axum::serve(listener, router).await.unwrap();
         });
         tokio::time::sleep(std::time::Duration::from_millis(300)).await;
-        use tao::event::{Event, WindowEvent};
-        use tao::event_loop::{ControlFlow, EventLoop};
-        use tao::window::WindowBuilder;
-        use wry::WebViewBuilder;
-        let event_loop = EventLoop::new();
-        let window = WindowBuilder::new()
-            .with_title("Amni-Code — AI Coding Agent")
-            .with_inner_size(tao::dpi::LogicalSize::new(1200.0, 800.0))
-            .build(&event_loop)
-            .unwrap();
-        let _webview = WebViewBuilder::new()
-            .with_url(&ui_url)
-            .with_devtools(true)
-            .build(&window)
-            .unwrap();
-        event_loop.run(move |event, _, control_flow| {
-            *control_flow = ControlFlow::Wait;
-            if let Event::WindowEvent {
-                event: WindowEvent::CloseRequested,
-                ..
-            } = event
-            {
-                *control_flow = ControlFlow::Exit;
-            }
-        });
+        if !open_desktop(&ui_url) {
+            println!("  Desktop window unavailable on this session (X11/Wayland); serving {ui_url}");
+            if std::env::var("AMNI_CODE_NO_OPEN").is_err() { let _ = open::that(&ui_url); }
+            std::future::pending::<()>().await;
+        }
     }
     Ok(())
 }
@@ -2537,6 +2642,10 @@ mod git_tool_tests {
         assert_eq!(parse_slash("/help"), Some(SlashCmd::Help));
         assert!(matches!(parse_slash("/commit fix the bug"), Some(SlashCmd::Prompt(_))));
         assert!(matches!(parse_slash("/review"), Some(SlashCmd::Prompt(_))));
+        assert!(matches!(parse_slash("/ship fix typo"), Some(SlashCmd::Ship(_))));
+        assert_eq!(parse_slash("/tasks"), Some(SlashCmd::Tasks));
+        assert_eq!(parse_slash("/doctor"), Some(SlashCmd::Doctor));
+        assert_eq!(parse_slash("/code"), Some(SlashCmd::CodeMode));
         assert_eq!(parse_slash("hello world"), None);
         assert_eq!(parse_slash("/unknowncmd"), None);
         assert_eq!(parse_slash("not /a slash"), None);
@@ -2699,4 +2808,8 @@ mod git_tool_tests {
         }
         let _ = std::fs::remove_dir_all(&dir);
     }
+}
+#[cfg(test)]mod cli_early_tests{use super::*;
+#[test]fn early_cli_help_and_unknown(){assert_eq!(parse_early(&["amni".into(),"--help".into()]),Early::Help);assert_eq!(parse_early(&["amni".into(),"-h".into()]),Early::Help);assert_eq!(parse_early(&["amni".into(),"--version".into()]),Early::Version);assert_eq!(parse_early(&["amni".into(),"--serve".into(),"/tmp".into()]),Early::Run);match parse_early(&["amni".into(),"--explode".into()]){Early::Bad(s)=>assert_eq!(s,"--explode"),o=>{panic!("{o:?}")}}assert!(usage().contains("--help")&&usage().contains("--no-update"));}
+#[test]fn has_upstream_is_false_without_tracking(){let d=std::env::temp_dir().join(format!("amni_up_{}",std::process::id()));let _=std::fs::remove_dir_all(&d);std::fs::create_dir_all(&d).unwrap();let st=std::process::Command::new("git").args(["init"]).current_dir(&d).status();assert!(st.map(|s|s.success()).unwrap_or(false));assert!(!has_upstream(&d));let _=std::fs::remove_dir_all(&d);}
 }

@@ -1,0 +1,2618 @@
+import os;
+import gfx;
+import math;
+import json;
+import gfx.codec_png;
+import gfx.sdf_font;
+let ENVP = "PATH=\"$HOME/.local/bin:$HOME/.opencode/bin:$HOME/.agy/bin:$HOME/.grok/bin:$PATH\"; ";
+let RAD f32 = 0.017453292;
+let SPIN real = 0.7;
+fn pname(p int) const byte[:] {
+	match p {
+		0 => "Grok Bot",
+		1 => "Claude Code",
+		2 => "Antigravity",
+		_ => "OpenCode",
+	}
+}
+fn pkey(p int) const byte[:] {
+	match p {
+		0 => "grok",
+		1 => "claude",
+		2 => "antigravity",
+		_ => "opencode",
+	}
+}
+fn pexe(p int) const byte[:] {
+	match p {
+		0 => "grok",
+		1 => "claude",
+		2 => "agy",
+		_ => "opencode",
+	}
+}
+struct Session { p int, n int, dir byte[..1024], sid byte[..160], cwd byte[..1024], model byte[..128], mode byte[..64], act byte[..160], first int, count int, size int, shown int, busy bool, since real, demo bool, ctx real, cost real, out_tok real, turns int }
+struct HoleU { a float4, h0 float4, h1 float4, m float4 }
+struct PostU { a float4, b float4 }
+var S Session[>..];
+var POOL byte[>..];
+var LOFF int[>..];
+var LLEN int[>..];
+var AV bool[4] = [false; 4];
+var LASTP int[4] = [-1; 4];
+var ROOT byte[>..];
+var HOME byte[>..];
+var CUR int = 0;
+var ROT f32 = 0.0;
+var ROT0 f32 = 0.0;
+var ROT1 f32 = 0.0;
+var T0 real = -9.0;
+var NOW real = 0.0;
+var SCROLL f32 = 0.0;
+var VIEW int = 0;
+var VIEWT f32 = 0.0;
+var VIEWF f32 = 0.0;
+var HIDE int = 0;
+var INPUT byte[>..];
+var DARK bool = true;
+var FRAMES bool = false;
+var W int = 1400;
+var H int = 900;
+var CX f32 = 700.0;
+var CY f32 = 450.0;
+var R f32 = 400.0;
+var WRAPU f32 = 40.0;
+var YS f32 = 1.0;
+var BX f32 = 0.0;
+var BY f32 = 0.0;
+var WG f32 = 0.0;
+var S0 f32 = 27.0;
+var FR int = 0;
+var FY0 f32 = 0.0;
+var FY1 f32 = 1.0;
+var FC f32 = 0.5;
+var LOGO TextVtx[>..];
+var READY bool = false;
+var PB gfx::Pipeline;
+var PO gfx::Pipeline;
+var PD gfx::Pipeline;
+var PU gfx::Pipeline;
+var SM gfx::Sampler;
+var SC gfx::Texture;
+var BL gfx::Texture[4] = [gfx::Texture { 0 }; 4];
+var TW int = 0;
+var TH int = 0;
+var HX float4[2] = [float4 { 0.0, 0.0, 0.0, 0.0 }; 2];
+var NH int = 0;
+fn wf() f32 { W as f32 }
+fn hf() f32 { H as f32 }
+fn set_text<T>(dst T&, src const byte[:]) {
+	dst.clear();
+	dst.append(src[..min(src.len, dst.cap)]);
+}
+fn channel(x f32) byte {
+	let v = clamp(x * 255.0, 0.0, 255.0) as int;
+	v as byte
+}
+fn rgba(c float3, a f32) byte[4] {
+	return [channel(c.x), channel(c.y), channel(c.z), channel(a)];
+}
+fn rgb(r f32, g f32, b f32) float3 { float3 { r, g, b } }
+fn pick(d float3, l float3) float3 { if DARK { d } else { l } }
+fn theme3(k int) float3 {
+	match k {
+		0 => pick(rgb(0.012, 0.018, 0.04), rgb(0.958, 0.938, 0.882)),
+		1 => pick(rgb(0.90, 0.88, 0.82), rgb(0.20, 0.16, 0.09)),
+		2 => pick(rgb(1.0, 0.80, 0.42), rgb(0.70, 0.50, 0.12)),
+		3 => pick(rgb(0.55, 0.58, 0.68), rgb(0.48, 0.42, 0.32)),
+		4 => pick(rgb(0.03, 0.045, 0.09), rgb(0.995, 0.98, 0.94)),
+		_ => pick(rgb(0.0, 0.0, 0.0), rgb(0.80, 0.68, 0.42)),
+	}
+}
+fn tc(k int, a f32) byte[4] { return rgba(theme3(k), a); }
+fn accent3(k int) float3 {
+	match k {
+		0 => pick(rgb(0.55, 0.90, 0.95), rgb(0.10, 0.42, 0.50)),
+		1 => pick(rgb(0.47, 0.80, 0.98), rgb(0.17, 0.38, 0.62)),
+		2 => pick(rgb(1.0, 0.40, 0.33), rgb(0.75, 0.17, 0.12)),
+		3 => pick(rgb(0.40, 0.95, 0.55), rgb(0.15, 0.55, 0.25)),
+		4 => pick(rgb(1.0, 0.72, 0.25), rgb(0.78, 0.47, 0.05)),
+		_ => pick(rgb(0.72, 0.55, 1.0), rgb(0.45, 0.30, 0.75)),
+	}
+}
+fn ac(k int, a f32) byte[4] { return rgba(accent3(k), a); }
+fn plat3(p int) float3 {
+	match p {
+		0 => rgb(0.55, 0.57, 0.65),
+		1 => rgb(0.85, 0.50, 0.32),
+		2 => rgb(0.32, 0.55, 0.95),
+		_ => rgb(0.40, 0.75, 0.45),
+	}
+}
+fn shadow(a f32) byte[4] {
+	let k f32 = if DARK { 0.45 } else { 0.12 };
+	return rgba(theme3(5), a * k);
+}
+fn mix3(a float3, b float3, t f32) float3 { float3 { a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t, a.z + (b.z - a.z) * t } }
+fn session_dir(p int, n int) byte[>..] { str(ROOT, "/", pkey(p), "/", n) }
+fn add_session(p int, n int) int {
+	var s = Session { p: p, n: n, size: -1, since: -1.0, .. };
+	let d = session_dir(p, n);
+	set_text(s.dir, d);
+	s.demo = file_exists(str(d, "/demo"));
+	S.push(s);
+	S.len - 1
+}
+fn make_session(p int) int {
+	var n = 1;
+	while is_dir(session_dir(p, n)) { n += 1; }
+	let d = session_dir(p, n);
+	run_command(str("mkdir -p '", d, "'"));
+	add_session(p, n)
+}
+fn scan() {
+	for p in 4 {
+		var n = 1;
+		while is_dir(session_dir(p, n)) {
+			add_session(p, n);
+			n += 1;
+		}
+		if n == 1 { make_session(p); }
+		LASTP[p] = -1;
+		for i in S.len {
+			if S[i].p == p {
+				LASTP[p] = i;
+				break;
+			}
+		}
+	}
+}
+fn check_available() {
+	for p in 4 {
+		let cmd = str(ENVP, "command -v ", pexe(p), " >/dev/null 2>&1");
+		AV[p] = run_command(cmd) == 0;
+	}
+}
+fn tilde(path const byte[:]) byte[>..] {
+	var out byte[>..] = [];
+	if starts_with(path, HOME[..]) {
+		out.push('~');
+		out.append(path[HOME.len..]);
+	} else {
+		out.append(path);
+	}
+	out
+}
+fn rank(i int) int {
+	var r = 0;
+	for j in i {
+		if S[j].p == S[i].p { r += 1; }
+	}
+	r
+}
+fn nth(p int, r int) int {
+	var seen = 0;
+	for i in S.len {
+		if S[i].p == p {
+			if seen == r { return i; }
+			seen += 1;
+		}
+	}
+	-1
+}
+fn cnt(p int) int {
+	var n = 0;
+	for i in S.len {
+		if S[i].p == p { n += 1; }
+	}
+	n
+}
+fn span() f32 { 360.0 / (S.len as f32) }
+fn order(i int) int {
+	var n = rank(i);
+	for j in S.len {
+		if S[j].p < S[i].p { n += 1; }
+	}
+	n
+}
+fn center(i int) f32 { ((order(i) as f32) + 0.5) * span() }
+fn ang(t f32) f32 { (t + ROT + 90.0) * RAD }
+fn wrap_deg(a f32) f32 {
+	var d = a;
+	while d > 180.0 { d -= 360.0; }
+	while d < -180.0 { d += 360.0; }
+	d
+}
+fn visible(i int) int {
+	if i == CUR { max(0, S[i].count - HIDE) } else { S[i].count }
+}
+fn go_to(i int) {
+	let d = wrap_deg(-center(i) - ROT1);
+	ROT0 = ROT;
+	ROT1 = ROT1 + d;
+	T0 = NOW;
+	CUR = i;
+	LASTP[S[i].p] = i;
+	VIEW = 0;
+	VIEWT = 0.0;
+	VIEWF = 0.0;
+	S[i].shown = visible(i);
+}
+fn step_by(dir int) {
+	let p = S[CUR].p;
+	let m = cnt(p);
+	go_to(nth(p, (rank(CUR) + dir + m) % m));
+}
+fn visible_w(t const byte[:], size f32) f32 {
+	var w f32 = 0.0;
+	var st = 0;
+	for i in t.len + 1 {
+		var stop = i == t.len;
+		if !stop {
+			let b = t[i];
+			stop = (b >= 1 && b <= 6) || b == 9;
+		}
+		if stop {
+			if i > st { w += sdf_text_w(t[st..i], size); }
+			st = i + 1;
+		}
+	}
+	w
+}
+fn utf_len(b byte) int {
+	if b >= 240 { 4 } else if b >= 224 { 3 } else if b >= 192 { 2 } else { 1 }
+}
+fn digit_byte(b byte) bool { b >= '0' && b <= '9' }
+fn put_line(out byte[>..]&, t const byte[:]) {
+	out.append(t);
+	out.push('\n');
+}
+fn hang_indent(t const byte[:]) int {
+	var n = 0;
+	while n < t.len && t[n] == ' ' { n += 1; }
+	let rest = t[n..t.len];
+	if starts_with(rest, "• ") || starts_with(rest, "◦ ") || starts_with(rest, "▪ ") || starts_with(rest, "☐ ") || starts_with(rest, "☑ ") { return n + 2; }
+	if rest.len > 0 && rest[0] == 2 {
+		var d = 1;
+		while d < rest.len && digit_byte(rest[d]) { d += 1; }
+		if d > 1 && d + 1 < rest.len && rest[d] == '.' && rest[d + 1] == 2 { return n + d - 1 + 2; }
+	}
+	n
+}
+fn wrap(out byte[>..]&, k byte, t const byte[:]) {
+	let h = if k == 'p' { hang_indent(t) } else { 0 };
+	let table = k == 'b' || k == 'H';
+	let clipped = table || k == 't';
+	var cur byte[>..] = [];
+	cur.push(k);
+	var width f32 = 0.0;
+	var i = 0;
+	var full = false;
+	while i < t.len && !full {
+		let b = t[i];
+		let from = i;
+		let end = min(i + utf_len(b), t.len);
+		i = end;
+		if b == 13 || b >= 240 || (b >= 128 && b < 192) { continue; }
+		if (b >= 1 && b <= 8) || (b == 9 && table) {
+			cur.push(b);
+			continue;
+		}
+		var ch byte[..4] = [];
+		if b == 9 { ch.push(' '); } else { ch.append(t[from..end]); }
+		let times = if b == 9 { 2 } else { 1 };
+		for rep in times {
+			if full { continue; }
+			cur.append(ch[..]);
+			width += sdf_text_w(ch[..], 1.0);
+			if width > WRAPU {
+				if clipped {
+					cur.append("…");
+					full = true;
+				} else {
+					var cut = cur.len;
+					var j = cur.len - 1;
+					while j > h + 1 && cur[j] != ' ' { j -= 1; }
+					if j > h + 1 && j > cur.len / 3 { cut = j; }
+					put_line(out, cur[..cut]);
+					var carried byte[>..] = [];
+					carried.push(k);
+					for z in h { carried.push(' '); }
+					for m in 1..9 {
+						var odd = false;
+						for q in cur[..cut] {
+							if (q as int) == m { odd = !odd; }
+						}
+						if odd { carried.push(m as byte); }
+					}
+					if cut + 1 < cur.len { carried.append(cur[cut + 1..cur.len]); }
+					cur.clear();
+					cur.append(carried);
+					width = visible_w(cur[1..cur.len], 1.0);
+				}
+			}
+		}
+	}
+	if cur.len > 1 { put_line(out, cur[..]); }
+}
+struct TexSym { name byte[..16], sym byte[..8] }
+var TEXSYMS TexSym[>..];
+fn letter_byte(b byte) bool { (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') }
+fn char_count(t const byte[:]) int {
+	var n = 0;
+	for b in t {
+		if b < 128 || b >= 192 { n += 1; }
+	}
+	n
+}
+fn script_char(out byte[>..]&, ch const byte[:], sup bool) bool {
+	let from = if sup { "0123456789+−=()abcdefghijklmnoprstuvwxyzT′" } else { "0123456789+−=()aehijklmnoprstuvx" };
+	let to = if sup { "⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻⁼⁽⁾ᵃᵇᶜᵈᵉᶠᵍʰⁱʲᵏˡᵐⁿᵒᵖʳˢᵗᵘᵛʷˣʸᶻᵀ′" } else { "₀₁₂₃₄₅₆₇₈₉₊₋₌₍₎ₐₑₕᵢⱼₖₗₘₙₒₚᵣₛₜᵤᵥₓ" };
+	var at = -1;
+	var i = 0;
+	var pos = 0;
+	while i < from.len {
+		let e = min(i + utf_len(from[i]), from.len);
+		if from[i..e] == ch {
+			at = pos;
+			break;
+		}
+		i = e;
+		pos += 1;
+	}
+	if at < 0 { return false; }
+	var j = 0;
+	var seen = 0;
+	while j < to.len {
+		let e = min(j + utf_len(to[j]), to.len);
+		if seen == at {
+			out.append(to[j..e]);
+			return true;
+		}
+		j = e;
+		seen += 1;
+	}
+	false
+}
+fn tex_group(s const byte[:], j int) int, int, int {
+	var a = j;
+	while a < s.len && s[a] == ' ' { a += 1; }
+	if a >= s.len { return s.len, s.len, s.len; }
+	if s[a] == '{' {
+		var depth = 0;
+		var k = a;
+		while k < s.len {
+			if s[k] == '{' {
+				depth += 1;
+			} else if s[k] == '}' {
+				depth -= 1;
+				if depth == 0 { return a + 1, k, k + 1; }
+			}
+			k += 1;
+		}
+		return a + 1, s.len, s.len;
+	}
+	let e = min(a + utf_len(s[a]), s.len);
+	return a, e, e;
+}
+fn tex_paren(out byte[>..]&, part const byte[:], parens bool) {
+	if parens { out.push('('); }
+	out.append(part);
+	if parens { out.push(')'); }
+}
+fn tex_frac(out byte[>..]&, mark int, mid int) {
+	var a byte[>..] = [];
+	a.append(out[mark..mid]);
+	var b byte[>..] = [];
+	b.append(out[mid..out.len]);
+	out.resize(mark, 0);
+	let na = char_count(a);
+	let nb = char_count(b);
+	if na == 1 && nb == 1 {
+		out.append(a);
+		out.append("⁄");
+		out.append(b);
+	} else {
+		tex_paren(out, a, na > 1);
+		out.push('/');
+		tex_paren(out, b, nb > 1);
+	}
+}
+fn tex_sqrt(out byte[>..]&, mark int) {
+	var g byte[>..] = [];
+	g.append(out[mark..out.len]);
+	out.resize(mark, 0);
+	out.append("√");
+	tex_paren(out, g, char_count(g) != 1);
+}
+fn tex_script(out byte[>..]&, mark int, sup bool) {
+	var f byte[>..] = [];
+	f.append(out[mark..out.len]);
+	out.resize(mark, 0);
+	var conv byte[>..] = [];
+	var every = true;
+	var i = 0;
+	while i < f.len {
+		let e = min(i + utf_len(f[i]), f.len);
+		if !script_char(conv, f[i..e], sup) { every = false; }
+		i = e;
+	}
+	if every {
+		out.append(conv);
+	} else {
+		if sup { out.push(7); } else { out.push(8); }
+		out.append(f);
+		if sup { out.push(7); } else { out.push(8); }
+	}
+}
+fn tex_bb(out byte[>..]&, g const byte[:]) {
+	if g == "R" {
+		out.append("ℝ");
+	} else if g == "N" {
+		out.append("ℕ");
+	} else if g == "Z" {
+		out.append("ℤ");
+	} else if g == "Q" {
+		out.append("ℚ");
+	} else if g == "C" {
+		out.append("ℂ");
+	} else {
+		out.append(g);
+	}
+}
+fn tex_styled(name const byte[:]) bool {
+	name == "mathrm" || name == "mathbf" || name == "mathit" || name == "mathsf" || name == "mathtt" || name == "boldsymbol" || name == "operatorname"
+}
+fn tex_named(out byte[>..]&, name const byte[:]) {
+	if name == "left" || name == "right" || name == "displaystyle" || name == "limits" || name == "nonumber" || name == "big" || name == "Big" || name == "bigg" || name == "Bigg" { return; }
+	if name == "quad" {
+		out.append("  ");
+		return;
+	}
+	if name == "qquad" {
+		out.append("    ");
+		return;
+	}
+	if TEXSYMS.len == 0 {
+		let table = texsyms();
+		TEXSYMS.append(table);
+	}
+	for entry in TEXSYMS {
+		if entry.name[..] == name {
+			out.append(entry.sym[..]);
+			return;
+		}
+	}
+	out.append(name);
+}
+recursive fn tex_into(out byte[>..]&, s const byte[:]) {
+	var i = 0;
+	while i < s.len {
+		let c = s[i];
+		if c == '\\' && i + 1 < s.len {
+			var e = i + 1;
+			while e < s.len && letter_byte(s[e]) { e += 1; }
+			if e > i + 1 {
+				let name = s[i + 1..e];
+				i = e;
+				if name == "frac" {
+					let a0, a1, an = tex_group(s, i);
+					let b0, b1, bn = tex_group(s, an);
+					let mark = out.len;
+					tex_into(out, s[a0..a1]);
+					let mid = out.len;
+					tex_into(out, s[b0..b1]);
+					tex_frac(out, mark, mid);
+					i = bn;
+				} else if name == "sqrt" {
+					let g0, g1, gn = tex_group(s, i);
+					let mark = out.len;
+					tex_into(out, s[g0..g1]);
+					tex_sqrt(out, mark);
+					i = gn;
+				} else if name == "mathbb" {
+					let g0, g1, gn = tex_group(s, i);
+					tex_bb(out, s[g0..g1]);
+					i = gn;
+				} else if name == "text" {
+					let g0, g1, gn = tex_group(s, i);
+					out.append(s[g0..g1]);
+					i = gn;
+				} else if tex_styled(name) {
+					let g0, g1, gn = tex_group(s, i);
+					tex_into(out, s[g0..g1]);
+					i = gn;
+				} else {
+					tex_named(out, name);
+				}
+			} else {
+				let d = s[i + 1];
+				if d == '\\' || d == ',' || d == ';' || d == ':' || d == ' ' {
+					let spaced = (out.len > 0 && out[out.len - 1] == ' ') || (i + 2 < s.len && s[i + 2] == ' ');
+					if !spaced { out.push(' '); }
+				} else if d != '!' {
+					out.push(d);
+				}
+				i += 2;
+			}
+		} else if c == '^' || c == '_' {
+			let g0, g1, gn = tex_group(s, i + 1);
+			let mark = out.len;
+			tex_into(out, s[g0..g1]);
+			tex_script(out, mark, c == '^');
+			i = gn;
+		} else {
+			if c == '~' {
+				out.push(' ');
+			} else if c == '-' {
+				out.append("−");
+			} else if c == '\'' {
+				out.append("′");
+			} else if c != '{' && c != '}' && !(c == ' ' && out.len > 0 && out[out.len - 1] == ' ') {
+				out.push(c);
+			}
+			i += 1;
+		}
+	}
+}
+fn tex(s const byte[:]) byte[>..] {
+	var out byte[>..] = [];
+	tex_into(out, s);
+	out
+}
+fn texsyms() TexSym[>..] {
+	var r TexSym[>..] = [];
+	r.push(TexSym{"alpha", "α"});
+	r.push(TexSym{"beta", "β"});
+	r.push(TexSym{"gamma", "γ"});
+	r.push(TexSym{"delta", "δ"});
+	r.push(TexSym{"epsilon", "ε"});
+	r.push(TexSym{"varepsilon", "ε"});
+	r.push(TexSym{"zeta", "ζ"});
+	r.push(TexSym{"eta", "η"});
+	r.push(TexSym{"theta", "θ"});
+	r.push(TexSym{"vartheta", "ϑ"});
+	r.push(TexSym{"iota", "ι"});
+	r.push(TexSym{"kappa", "κ"});
+	r.push(TexSym{"lambda", "λ"});
+	r.push(TexSym{"mu", "μ"});
+	r.push(TexSym{"nu", "ν"});
+	r.push(TexSym{"xi", "ξ"});
+	r.push(TexSym{"pi", "π"});
+	r.push(TexSym{"rho", "ρ"});
+	r.push(TexSym{"sigma", "σ"});
+	r.push(TexSym{"tau", "τ"});
+	r.push(TexSym{"upsilon", "υ"});
+	r.push(TexSym{"phi", "φ"});
+	r.push(TexSym{"varphi", "φ"});
+	r.push(TexSym{"chi", "χ"});
+	r.push(TexSym{"psi", "ψ"});
+	r.push(TexSym{"omega", "ω"});
+	r.push(TexSym{"Gamma", "Γ"});
+	r.push(TexSym{"Delta", "Δ"});
+	r.push(TexSym{"Theta", "Θ"});
+	r.push(TexSym{"Lambda", "Λ"});
+	r.push(TexSym{"Xi", "Ξ"});
+	r.push(TexSym{"Pi", "Π"});
+	r.push(TexSym{"Sigma", "Σ"});
+	r.push(TexSym{"Phi", "Φ"});
+	r.push(TexSym{"Psi", "Ψ"});
+	r.push(TexSym{"Omega", "Ω"});
+	r.push(TexSym{"sum", "∑"});
+	r.push(TexSym{"prod", "∏"});
+	r.push(TexSym{"int", "∫"});
+	r.push(TexSym{"iint", "∬"});
+	r.push(TexSym{"oint", "∮"});
+	r.push(TexSym{"partial", "∂"});
+	r.push(TexSym{"nabla", "∇"});
+	r.push(TexSym{"infty", "∞"});
+	r.push(TexSym{"le", "≤"});
+	r.push(TexSym{"leq", "≤"});
+	r.push(TexSym{"ge", "≥"});
+	r.push(TexSym{"geq", "≥"});
+	r.push(TexSym{"ll", "≪"});
+	r.push(TexSym{"gg", "≫"});
+	r.push(TexSym{"ne", "≠"});
+	r.push(TexSym{"neq", "≠"});
+	r.push(TexSym{"approx", "≈"});
+	r.push(TexSym{"equiv", "≡"});
+	r.push(TexSym{"cong", "≅"});
+	r.push(TexSym{"sim", "∼"});
+	r.push(TexSym{"simeq", "≃"});
+	r.push(TexSym{"propto", "∝"});
+	r.push(TexSym{"times", "×"});
+	r.push(TexSym{"cdot", "·"});
+	r.push(TexSym{"div", "÷"});
+	r.push(TexSym{"pm", "±"});
+	r.push(TexSym{"mp", "∓"});
+	r.push(TexSym{"ast", "∗"});
+	r.push(TexSym{"star", "⋆"});
+	r.push(TexSym{"circ", "∘"});
+	r.push(TexSym{"bullet", "•"});
+	r.push(TexSym{"oplus", "⊕"});
+	r.push(TexSym{"otimes", "⊗"});
+	r.push(TexSym{"to", "→"});
+	r.push(TexSym{"rightarrow", "→"});
+	r.push(TexSym{"leftarrow", "←"});
+	r.push(TexSym{"gets", "←"});
+	r.push(TexSym{"leftrightarrow", "↔"});
+	r.push(TexSym{"Rightarrow", "⇒"});
+	r.push(TexSym{"Leftarrow", "⇐"});
+	r.push(TexSym{"Leftrightarrow", "⇔"});
+	r.push(TexSym{"implies", "⇒"});
+	r.push(TexSym{"iff", "⇔"});
+	r.push(TexSym{"mapsto", "↦"});
+	r.push(TexSym{"uparrow", "↑"});
+	r.push(TexSym{"downarrow", "↓"});
+	r.push(TexSym{"in", "∈"});
+	r.push(TexSym{"notin", "∉"});
+	r.push(TexSym{"ni", "∋"});
+	r.push(TexSym{"subset", "⊂"});
+	r.push(TexSym{"subseteq", "⊆"});
+	r.push(TexSym{"supset", "⊃"});
+	r.push(TexSym{"supseteq", "⊇"});
+	r.push(TexSym{"cup", "∪"});
+	r.push(TexSym{"cap", "∩"});
+	r.push(TexSym{"setminus", "∖"});
+	r.push(TexSym{"emptyset", "∅"});
+	r.push(TexSym{"varnothing", "∅"});
+	r.push(TexSym{"forall", "∀"});
+	r.push(TexSym{"exists", "∃"});
+	r.push(TexSym{"neg", "¬"});
+	r.push(TexSym{"lnot", "¬"});
+	r.push(TexSym{"land", "∧"});
+	r.push(TexSym{"wedge", "∧"});
+	r.push(TexSym{"lor", "∨"});
+	r.push(TexSym{"vee", "∨"});
+	r.push(TexSym{"top", "⊤"});
+	r.push(TexSym{"bot", "⊥"});
+	r.push(TexSym{"perp", "⊥"});
+	r.push(TexSym{"parallel", "∥"});
+	r.push(TexSym{"mid", "∣"});
+	r.push(TexSym{"angle", "∠"});
+	r.push(TexSym{"ldots", "…"});
+	r.push(TexSym{"cdots", "⋯"});
+	r.push(TexSym{"vdots", "⋮"});
+	r.push(TexSym{"ddots", "⋱"});
+	r.push(TexSym{"dots", "…"});
+	r.push(TexSym{"prime", "′"});
+	r.push(TexSym{"degree", "°"});
+	r.push(TexSym{"hbar", "ħ"});
+	r.push(TexSym{"ell", "ℓ"});
+	r.push(TexSym{"Re", "ℜ"});
+	r.push(TexSym{"Im", "ℑ"});
+	r.push(TexSym{"aleph", "ℵ"});
+	r.push(TexSym{"langle", "⟨"});
+	r.push(TexSym{"rangle", "⟩"});
+	r.push(TexSym{"lfloor", "⌊"});
+	r.push(TexSym{"rfloor", "⌋"});
+	r.push(TexSym{"lceil", "⌈"});
+	r.push(TexSym{"rceil", "⌉"});
+	r.push(TexSym{"lbrace", "{"});
+	r.push(TexSym{"rbrace", "}"});
+	r.push(TexSym{"Vert", "‖"});
+	r.push(TexSym{"dagger", "†"});
+	r.push(TexSym{"checkmark", "✓"});
+	r.push(TexSym{"square", "□"});
+	r
+}
+fn word_byte(b byte) bool { letter_byte(b) || digit_byte(b) }
+fn escapable(b byte) bool {
+	b == '\\' || b == '`' || b == '*' || b == '_' || b == '~' || b == '$' || b == '[' || b == ']' || b == '(' || b == ')' || b == '#' || b == '|'
+}
+fn find_two(s const byte[:], from int, a byte, b byte) int {
+	var j = from;
+	while j + 1 < s.len {
+		if s[j] == a && s[j + 1] == b { return j; }
+		j += 1;
+	}
+	-1
+}
+fn find_one(s const byte[:], from int, a byte) int {
+	var j = from;
+	while j < s.len {
+		if s[j] == a { return j; }
+		j += 1;
+	}
+	s.len
+}
+fn dollar_end(s const byte[:], i int) int {
+	var j = i + 1;
+	while j < s.len {
+		if s[j] == '$' && s[j - 1] != ' ' && (j + 1 >= s.len || !digit_byte(s[j + 1])) { return j; }
+		j += 1;
+	}
+	-1
+}
+fn link_ends(s const byte[:], i int) int, int {
+	let mid = find_two(s, i + 1, ']', '(');
+	if mid < 0 { return -1, -1; }
+	let close = find_one(s, mid + 2, ')');
+	if close >= s.len { return -1, -1; }
+	return mid, close;
+}
+recursive fn marks_into(out byte[>..]&, s const byte[:]) {
+	var italic = false;
+	var i = 0;
+	while i < s.len {
+		let c = s[i];
+		let more = i + 1 < s.len;
+		var nx byte = 0;
+		if more { nx = s[i + 1]; }
+		if c == '`' {
+			out.push(1);
+			let j = find_one(s, i + 1, '`');
+			out.append(s[i + 1..j]);
+			if j < s.len { out.push(1); }
+			i = j + 1;
+			continue;
+		}
+		if c == '\\' && more && nx == '(' {
+			let j = find_two(s, i + 2, '\\', ')');
+			if j >= 0 {
+				out.push(5);
+				tex_into(out, s[i + 2..j]);
+				out.push(5);
+				i = j + 2;
+				continue;
+			}
+		}
+		if c == '\\' && more && escapable(nx) {
+			out.push(nx);
+			i += 2;
+			continue;
+		}
+		if more && ((c == '*' && nx == '*') || (c == '_' && nx == '_')) {
+			out.push(2);
+			i += 2;
+			continue;
+		}
+		if more && c == '~' && nx == '~' {
+			out.push(4);
+			i += 2;
+			continue;
+		}
+		if c == '*' || c == '_' {
+			var opens = !italic && more && nx != ' ';
+			var closes = italic && i > 0 && s[i - 1] != ' ';
+			if c == '_' {
+				if opens && i > 0 && word_byte(s[i - 1]) { opens = false; }
+				if closes && more && word_byte(nx) { closes = false; }
+			}
+			if opens || closes {
+				out.push(3);
+				italic = !italic;
+			} else {
+				out.push(c);
+			}
+			i += 1;
+			continue;
+		}
+		if c == '$' && more && nx == '$' {
+			let j = find_two(s, i + 2, '$', '$');
+			if j >= 0 {
+				out.push(5);
+				tex_into(out, s[i + 2..j]);
+				out.push(5);
+				i = j + 2;
+				continue;
+			}
+		} else if c == '$' && more && nx != ' ' {
+			let j = dollar_end(s, i);
+			if j >= 0 {
+				out.push(5);
+				tex_into(out, s[i + 1..j]);
+				out.push(5);
+				i = j + 1;
+				continue;
+			}
+		}
+		if c == '!' && more && nx == '[' {
+			let mid, close = link_ends(s, i + 1);
+			if mid >= 0 {
+				i += 1;
+				continue;
+			}
+		}
+		if c == '[' {
+			let mid, close = link_ends(s, i);
+			if mid >= 0 {
+				out.push(6);
+				marks_into(out, s[i + 1..mid]);
+				out.push(6);
+				i = close + 1;
+				continue;
+			}
+		}
+		out.push(c);
+		i += 1;
+	}
+}
+fn marks(s const byte[:]) byte[>..] {
+	var out byte[>..] = [];
+	marks_into(out, s);
+	out
+}
+fn all_of(t const byte[:], b byte) bool {
+	for x in t {
+		if x != b { return false; }
+	}
+	true
+}
+fn divider_row(t const byte[:]) bool {
+	for x in t {
+		if x != '|' && x != '-' && x != ':' && x != ' ' { return false; }
+	}
+	true
+}
+fn last_line_start(t const byte[:]) int {
+	var j = t.len - 1;
+	while j > 0 && t[j - 1] != '\n' { j -= 1; }
+	j
+}
+fn emit_blank(out byte[>..]&) {
+	if out.len == 0 { return; }
+	let at = last_line_start(out[..]);
+	if out[at..out.len] == "p\n" { return; }
+	put_line(out, "p");
+}
+fn emit_row(out byte[>..]&, ts const byte[:]) {
+	let parts = split(ts, '|');
+	let total = parts.len;
+	var row byte[>..] = [];
+	var used = 0;
+	for part, k in parts {
+		if (k == 0 || k == total - 1) && part.len == 0 { continue; }
+		if used > 0 { row.push(9); }
+		let cell = trim(part);
+		marks_into(row, cell);
+		used += 1;
+	}
+	wrap(out, 'b', row);
+}
+fn emit_text(out byte[>..]&, s const byte[:], ts const byte[:]) {
+	var n = 0;
+	while n < s.len && s[n] == ' ' { n += 1; }
+	let r = s[n..s.len];
+	var item byte[>..] = [];
+	for z in 2 * n { item.push(' '); }
+	if r.len >= 2 && (r[0] == '-' || r[0] == '*' || r[0] == '+') && r[1] == ' ' {
+		let rest = r[2..r.len];
+		if starts_with(rest, "[ ] ") {
+			item.append("☐ ");
+			marks_into(item, rest[4..rest.len]);
+		} else if starts_with(rest, "[x] ") || starts_with(rest, "[X] ") {
+			item.append("☑ ");
+			marks_into(item, rest[4..rest.len]);
+		} else {
+			if n < 2 {
+				item.append("•");
+			} else if n < 4 {
+				item.append("◦");
+			} else {
+				item.append("▪");
+			}
+			item.push(' ');
+			marks_into(item, rest);
+		}
+		wrap(out, 'p', item);
+		return;
+	}
+	var d = 0;
+	while d < r.len && digit_byte(r[d]) { d += 1; }
+	if d > 0 && d + 1 < r.len && (r[d] == '.' || r[d] == ')') && r[d + 1] == ' ' {
+		item.push(2);
+		item.append(r[..d]);
+		item.push('.');
+		item.push(2);
+		item.push(' ');
+		marks_into(item, r[d + 2..r.len]);
+		wrap(out, 'p', item);
+		return;
+	}
+	if starts_with(ts, "> ") {
+		let quoted = marks(ts[2..ts.len]);
+		wrap(out, 'q', quoted);
+		return;
+	}
+	let plain = marks(s);
+	wrap(out, 'p', plain);
+}
+fn emit(out byte[>..]&, t const byte[:], base byte) {
+	var code = false;
+	var math_on = false;
+	let source = split(t, '\n');
+	for s in source {
+		let ts = trim(s);
+		if code {
+			if starts_with(ts, "```") { code = false; } else { wrap(out, 'c', s); }
+		} else if math_on {
+			if ts == "$$" || ts == "\\]" {
+				math_on = false;
+			} else {
+				let formula = tex(ts);
+				wrap(out, 'M', formula);
+			}
+		} else if starts_with(ts, "```") {
+			code = true;
+		} else if ts == "$$" || ts == "\\[" {
+			math_on = true;
+		} else if base != 'p' {
+			let marked = marks(s);
+			wrap(out, base, marked);
+		} else if ts.len == 0 {
+			emit_blank(out);
+		} else if ts.len > 4 && starts_with(ts, "$$") && ends_with(ts, "$$") {
+			let formula = tex(ts[2..ts.len - 2]);
+			wrap(out, 'M', formula);
+		} else {
+			var n = 0;
+			while n < ts.len && ts[n] == '#' { n += 1; }
+			if n >= 1 && n <= 6 && n < ts.len && ts[n] == ' ' {
+				var kind byte = 'j';
+				if n == 1 { kind = 'h'; } else if n == 2 { kind = 'g'; }
+				let head = marks(ts[n + 1..ts.len]);
+				wrap(out, kind, head);
+			} else if ts.len >= 3 && (all_of(ts, '-') || all_of(ts, '*') || all_of(ts, '_')) {
+				put_line(out, "r");
+			} else if ts[0] == '|' && divider_row(ts) {
+				if out.len > 0 {
+					let at = last_line_start(out[..]);
+					if out[at] == 'b' { out[at] = 'H'; }
+				}
+			} else if ts[0] == '|' {
+				emit_row(out, ts);
+			} else {
+				emit_text(out, s, ts);
+			}
+		}
+	}
+}
+fn fixed_dec(v real, d int) byte[>..] {
+	var scale = 1;
+	for z in d { scale *= 10; }
+	let r = (v * (scale as real) + 0.5) as int;
+	var out byte[>..] = [];
+	format(out, r / scale);
+	if d > 0 {
+		out.push('.');
+		let frac = str(r % scale);
+		for z in d - frac.len { out.push('0'); }
+		out.append(frac);
+	}
+	out
+}
+fn compact(v real) byte[>..] {
+	var out byte[>..] = [];
+	if v < 1000.0 {
+		format(out, v as int);
+	} else if v < 1000000.0 {
+		let k = fixed_dec(v / 1000.0, 1);
+		out.append(k);
+		out.push('K');
+	} else {
+		let m = fixed_dec(v / 1000000.0, 2);
+		out.append(m);
+		out.push('M');
+	}
+	out
+}
+fn spinner(t real) const byte[:] {
+	let frame = ((t * 8.0) as int) % 10;
+	match frame {
+		0 => "·",
+		1 => "✢",
+		2 => "✳",
+		3 => "✶",
+		4 => "✻",
+		5 => "✽",
+		6 => "✻",
+		7 => "✶",
+		8 => "✳",
+		_ => "✢",
+	}
+}
+fn jmember(doc json::Doc&, node int, key const byte[:]) int {
+	if node < 0 { return -1; }
+	json::member(doc, node, key)
+}
+fn jstring(doc json::Doc&, node int) byte[>..] {
+	var out byte[>..] = [];
+	if node >= 0 {
+		if json::kind(doc, node) == json::K_STR {
+			let t = json::text_of(doc, node);
+			out.append(t);
+		}
+	}
+	out
+}
+fn jtext(doc json::Doc&, node int, key const byte[:]) byte[>..] {
+	var out byte[>..] = [];
+	let m = jmember(doc, node, key);
+	let t = jstring(doc, m);
+	out.append(t);
+	out
+}
+fn first_line(t const byte[:]) const byte[:] {
+	var n = 0;
+	while n < t.len && t[n] != '\n' { n += 1; }
+	t[..n]
+}
+fn cut_at(t const byte[:], limit int) int {
+	var k = limit;
+	while k > 0 && t[k] >= 128 && t[k] < 192 { k -= 1; }
+	k
+}
+fn tool_key(k int) const byte[:] {
+	match k {
+		0 => "file_path",
+		1 => "command",
+		2 => "pattern",
+		3 => "path",
+		4 => "url",
+		5 => "query",
+		6 => "description",
+		_ => "prompt",
+	}
+}
+fn tool_summary(doc json::Doc&, node int) byte[>..] {
+	var out byte[>..] = [];
+	for k in 8 {
+		let v = jtext(doc, node, tool_key(k));
+		if v.len == 0 { continue; }
+		let one = first_line(v);
+		let homed = tilde(one);
+		if homed.len > 90 {
+			out.append(homed[..cut_at(homed, 87)]);
+			out.append("…");
+		} else {
+			out.append(homed);
+		}
+		break;
+	}
+	out
+}
+fn id_key(k int) const byte[:] {
+	match k {
+		0 => "session_id",
+		1 => "sessionID",
+		_ => "conversation_id",
+	}
+}
+fn reply_key(k int) const byte[:] {
+	match k {
+		0 => "response",
+		1 => "text",
+		_ => "output",
+	}
+}
+fn jnum(doc json::Doc&, node int, key const byte[:]) real, bool {
+	let m = jmember(doc, node, key);
+	if m < 0 { return 0.0, false; }
+	let v, ok = json::as_f64(doc, m);
+	if !ok { return 0.0, false; }
+	return v, true;
+}
+fn jval(doc json::Doc&, node int, key const byte[:]) real {
+	let v, ok = jnum(doc, node, key);
+	v
+}
+fn jtrue(doc json::Doc&, node int, key const byte[:]) bool {
+	let m = jmember(doc, node, key);
+	if m < 0 { return false; }
+	let b, ok = json::as_bool(doc, m);
+	ok && b
+}
+fn jcount(doc json::Doc&, node int) int {
+	if node < 0 { return 0; }
+	json::count(doc, node)
+}
+fn emit_thought(lines byte[>..]&, th const byte[:]) {
+	let head = trim(first_line(th));
+	if head.len == 0 { return; }
+	var msg byte[>..] = [];
+	msg.append("✻ ");
+	msg.push(3);
+	if head.len > 140 {
+		msg.append(head[..cut_at(head, 140)]);
+		msg.append("…");
+	} else {
+		msg.append(head);
+	}
+	msg.push(3);
+	emit(lines, msg, 'k');
+}
+fn emit_tool(lines byte[>..]&, doc json::Doc&, i int, name const byte[:], input int) {
+	var msg byte[>..] = [];
+	msg.push(2);
+	msg.append(name);
+	msg.push(2);
+	msg.append("  ");
+	let summary = tool_summary(doc, input);
+	msg.append(summary);
+	emit(lines, msg, 't');
+	let act = str("Running ", name);
+	set_text(S[i].act, act);
+}
+fn parse_event(doc json::Doc&, n int, i int, lines byte[>..]&) {
+	let t = jtext(doc, n, "type");
+	for k in 3 {
+		let id = jtext(doc, n, id_key(k));
+		if id.len > 0 {
+			set_text(S[i].sid, id);
+			break;
+		}
+	}
+	if t == "user" {
+		let said = jtext(doc, n, "text");
+		if said.len > 0 {
+			put_line(lines, "p");
+			emit(lines, said, 'u');
+			set_text(S[i].act, "Starting");
+			return;
+		}
+	}
+	let message = jmember(doc, n, "message");
+	if t == "user" && message >= 0 {
+		set_text(S[i].act, "Reading results");
+		let content = jmember(doc, message, "content");
+		for k in jcount(doc, content) {
+			let item = json::element(doc, content, k);
+			let kind = jtext(doc, item, "type");
+			if kind == "tool_result" && jtrue(doc, item, "is_error") {
+				let body = jmember(doc, item, "content");
+				var why byte[>..] = [];
+				if body >= 0 {
+					if json::kind(doc, body) == json::K_STR {
+						let direct = jstring(doc, body);
+						why.append(direct);
+					} else if jcount(doc, body) > 0 {
+						let nested = jtext(doc, json::element(doc, body, 0), "text");
+						why.append(nested);
+					}
+				}
+				var msg byte[>..] = [];
+				msg.append("Tool failed: ");
+				msg.append(first_line(why));
+				emit(lines, msg, 'e');
+			}
+		}
+		return;
+	}
+	if t == "system" {
+		let cwd = jtext(doc, n, "cwd");
+		if cwd.len > 0 { set_text(S[i].cwd, cwd); }
+		let model = jtext(doc, n, "model");
+		if model.len > 0 { set_text(S[i].model, model); }
+		let mode = jtext(doc, n, "permissionMode");
+		if mode.len > 0 { set_text(S[i].mode, mode); }
+		return;
+	}
+	if t == "assistant" && message >= 0 {
+		let model = jtext(doc, message, "model");
+		if model.len > 0 && S[i].model.len == 0 { set_text(S[i].model, model); }
+		let usage = jmember(doc, message, "usage");
+		if usage >= 0 {
+			let total = jval(doc, usage, "input_tokens") + jval(doc, usage, "cache_creation_input_tokens") + jval(doc, usage, "cache_read_input_tokens") + jval(doc, usage, "output_tokens");
+			if total > 0.0 { S[i].ctx = total; }
+		}
+		let content = jmember(doc, message, "content");
+		for k in jcount(doc, content) {
+			let item = json::element(doc, content, k);
+			let kind = jtext(doc, item, "type");
+			if kind == "thinking" {
+				let th = jtext(doc, item, "thinking");
+				emit_thought(lines, th);
+				set_text(S[i].act, "Thinking");
+			} else if kind == "redacted_thinking" {
+				set_text(S[i].act, "Thinking");
+			} else if kind == "text" {
+				let said = jtext(doc, item, "text");
+				emit(lines, said, 'p');
+				set_text(S[i].act, "Writing");
+			} else if kind == "tool_use" {
+				let name = jtext(doc, item, "name");
+				emit_tool(lines, doc, i, name, jmember(doc, item, "input"));
+			}
+		}
+		return;
+	}
+	let part = jmember(doc, n, "part");
+	if part >= 0 {
+		let kind = jtext(doc, part, "type");
+		if kind == "text" {
+			let said = jtext(doc, part, "text");
+			emit(lines, said, 'p');
+			set_text(S[i].act, "Writing");
+		} else if kind == "reasoning" {
+			let th = jtext(doc, part, "text");
+			emit_thought(lines, th);
+			set_text(S[i].act, "Thinking");
+		} else if kind == "tool" {
+			let name = jtext(doc, part, "tool");
+			let state = jmember(doc, part, "state");
+			emit_tool(lines, doc, i, name, jmember(doc, state, "input"));
+		} else if kind == "step-finish" {
+			let tokens = jmember(doc, part, "tokens");
+			if tokens >= 0 {
+				let cache = jmember(doc, tokens, "cache");
+				let total = jval(doc, tokens, "input") + jval(doc, tokens, "output") + jval(doc, tokens, "reasoning") + jval(doc, cache, "read") + jval(doc, cache, "write");
+				if total > 0.0 { S[i].ctx = total; }
+				S[i].cost += jval(doc, part, "cost");
+				S[i].out_tok += jval(doc, tokens, "output");
+			}
+		}
+		return;
+	}
+	if t == "result" {
+		S[i].act.clear();
+		let cost, has_cost = jnum(doc, n, "total_cost_usd");
+		S[i].cost += cost;
+		let turns, has_turns = jnum(doc, n, "num_turns");
+		S[i].turns += turns as int;
+		let usage = jmember(doc, n, "usage");
+		S[i].out_tok += jval(doc, usage, "output_tokens");
+		let result = jtext(doc, n, "result");
+		if jtrue(doc, n, "is_error") && result.len > 0 { emit(lines, result, 'e'); }
+		var summary byte[>..] = [];
+		let duration, has_duration = jnum(doc, n, "duration_ms");
+		if has_duration {
+			let secs = fixed_dec(duration / 1000.0, 1);
+			format(summary, "done in ", secs, " s");
+		}
+		if has_cost {
+			if summary.len > 0 { summary.append("  ·  "); }
+			let money = fixed_dec(cost, 4);
+			format(summary, "$", money);
+		}
+		if has_turns {
+			if summary.len > 0 { summary.append("  ·  "); }
+			let count = turns as int;
+			format(summary, count);
+			if count == 1 { summary.append(" turn"); } else { summary.append(" turns"); }
+		}
+		if summary.len > 0 { emit(lines, summary, 'm'); }
+		return;
+	}
+	if t == "stream_event" || t == "step_start" || t == "step_finish" { return; }
+	let error = jmember(doc, n, "error");
+	if error >= 0 {
+		var why byte[>..] = [];
+		if json::kind(doc, error) == json::K_STR {
+			let direct = jstring(doc, error);
+			why.append(direct);
+		} else {
+			let said = jtext(doc, error, "message");
+			if said.len > 0 {
+				why.append(said);
+			} else {
+				let deeper = jtext(doc, jmember(doc, error, "data"), "message");
+				why.append(deeper);
+			}
+		}
+		if why.len > 0 {
+			emit(lines, why, 'e');
+			return;
+		}
+	}
+	for k in 3 {
+		let reply = jtext(doc, n, reply_key(k));
+		if reply.len > 0 {
+			emit(lines, reply, 'p');
+			break;
+		}
+	}
+}
+fn line(i int, at int) const byte[:] {
+	let k = S[i].first + at;
+	POOL[LOFF[k]..LOFF[k] + LLEN[k]]
+}
+fn store_lines(i int, buf const byte[:]) {
+	var pool byte[>..] = [];
+	var offs int[>..] = [];
+	var lens int[>..] = [];
+	for j in S.len {
+		let first = offs.len;
+		if j == i {
+			var st = 0;
+			for k in buf.len {
+				if buf[k] == '\n' {
+					offs.push(pool.len);
+					lens.push(k - st);
+					pool.append(buf[st..k]);
+					st = k + 1;
+				}
+			}
+		} else {
+			for k in S[j].count {
+				let l = line(j, k);
+				offs.push(pool.len);
+				lens.push(l.len);
+				pool.append(l);
+			}
+		}
+		S[j].first = first;
+		S[j].count = offs.len - first;
+	}
+	POOL.clear();
+	POOL.append(pool);
+	LOFF.clear();
+	LOFF.append(offs);
+	LLEN.clear();
+	LLEN.append(lens);
+}
+fn refresh(i int) {
+	let busy = file_exists(str(S[i].dir, "/busy"));
+	S[i].busy = busy;
+	if busy && S[i].since < 0.0 { S[i].since = NOW; }
+	if !busy { S[i].since = -1.0; }
+	var logged byte[>..] = [];
+	let log_path = str(S[i].dir, "/log.jsonl");
+	if !read_file(log_path, logged) { logged.clear(); }
+	var errs byte[>..] = [];
+	let err_path = str(S[i].dir, "/err.log");
+	if !read_file(err_path, errs) { errs.clear(); }
+	let total = logged.len + 7 * errs.len;
+	if total == S[i].size { return; }
+	S[i].size = total;
+	S[i].act.clear();
+	S[i].ctx = 0.0;
+	S[i].cost = 0.0;
+	S[i].out_tok = 0.0;
+	S[i].turns = 0;
+	var lines byte[>..] = [];
+	var acc byte[>..] = [];
+	var doc = json::Doc {};
+	let rows = split(logged, '\n');
+	for row in rows {
+		if row.len > 0 && row[0] == '{' { acc.clear(); }
+		acc.append(row);
+		acc.push('\n');
+		let root, msg = json::parse(acc, doc);
+		if root >= 0 {
+			parse_event(doc, root, i, lines);
+			acc.clear();
+		}
+	}
+	if errs.len > 0 && !busy {
+		let tail = split(errs, '\n');
+		let many = tail.len;
+		for row, k in tail {
+			if k >= many - 3 && row.len > 0 { emit(lines, row, 'e'); }
+		}
+	}
+	store_lines(i, lines[..]);
+}
+fn refresh_all() {
+	for i in S.len { refresh(i); }
+}
+fn resume_flag(p int) const byte[:] {
+	match p {
+		0 => " --session ",
+		1 => " --resume ",
+		2 => " --conversation ",
+		_ => " -s ",
+	}
+}
+fn command(i int, d const byte[:]) byte[>..] {
+	let p = S[i].p;
+	var rs byte[>..] = [];
+	if S[i].sid.len > 0 { format(rs, resume_flag(p), S[i].sid); }
+	if p == 1 { return str("claude -p --output-format stream-json --verbose --permission-mode acceptEdits", rs, " < '", d, "/prompt.txt'"); }
+	if p == 2 { return str("agy --print \"$(cat '", d, "/prompt.txt')\" --output-format json", rs); }
+	if p == 3 { return str("opencode run --format json ${AMNI_DIAL_OPENCODE_MODEL:+-m $AMNI_DIAL_OPENCODE_MODEL}", rs, " < '", d, "/prompt.txt'"); }
+	str("grok --prompt-file '", d, "/prompt.txt' --output-format streaming-messages-json --permission-mode dontAsk")
+}
+fn send() {
+	if INPUT.len == 0 { return; }
+	if !AV[S[CUR].p] || S[CUR].busy || S[CUR].demo { return; }
+	var d byte[>..] = [];
+	d.append(S[CUR].dir);
+	write_file(str(d, "/prompt.txt"), INPUT);
+	var entry byte[>..] = [];
+	entry.append("{\"type\":\"user\",\"text\":");
+	json::format_string(entry, INPUT);
+	entry.append("}\n");
+	append_file(str(d, "/log.jsonl"), entry);
+	write_file(str(d, "/busy"), "1");
+	S[CUR].busy = true;
+	S[CUR].since = NOW;
+	let cmd = command(CUR, d);
+	let script = str(ENVP, cmd, " >> '", d, "/log.jsonl' 2>> '", d, "/err.log'; rm -f '", d, "/busy'\n");
+	write_file(str(d, "/run.sh"), script);
+	run_command(str("if command -v setsid >/dev/null; then setsid -f sh '", d, "/run.sh'; else (sh '", d, "/run.sh' &); fi >/dev/null 2>&1 </dev/null"));
+	INPUT.clear();
+	VIEWT = 0.0;
+	refresh(CUR);
+}
+fn seed(path const byte[:]) {
+	var text byte[>..] = [];
+	if !read_file(path, text) {
+		print("no transcript ", path);
+		return;
+	}
+	let i = nth(1, 0);
+	var log byte[>..] = [];
+	log.append("{\"type\":\"user\",\"text\":\"Make one focused improvement to helium-graphics.\"}\n");
+	log.append("{\"type\":\"replay\",\"text\":");
+	json::format_string(log, text);
+	log.append("}\n");
+	write_file(str(S[i].dir, "/log.jsonl"), log);
+	write_file(str(S[i].dir, "/demo"), "recorded Claude Code run, replayed");
+	S[i].demo = true;
+	S[i].size = -1;
+}
+fn vtx(vs TextVtx[>..]&, p float2, c byte[4]) {
+	vs.push(TextVtx { pos: p, uv: float2 { -1.0, -1.0 }, col: c });
+}
+fn quad(vs TextVtx[>..]&, p0 float2, p1 float2, p2 float2, p3 float2, c0 byte[4], c1 byte[4], c2 byte[4], c3 byte[4]) {
+	vtx(vs, p0, c0);
+	vtx(vs, p1, c1);
+	vtx(vs, p2, c2);
+	vtx(vs, p0, c0);
+	vtx(vs, p2, c2);
+	vtx(vs, p3, c3);
+}
+fn flat_quad(vs TextVtx[>..]&, p0 float2, p1 float2, p2 float2, p3 float2, c byte[4]) {
+	quad(vs, p0, p1, p2, p3, c, c, c, c);
+}
+fn pt(r f32, a f32) float2 {
+	let co = cos(a) as f32;
+	let si = sin(a) as f32;
+	float2 { CX + r * co, CY + r * si * YS }
+}
+fn band(vs TextVtx[>..]&, r0 f32, r1 f32, a0 f32, a1 f32, ci byte[4], co byte[4]) {
+	let n = max(1, ((abs(a1 - a0) / 0.02) as int) + 1);
+	for k in n {
+		let u0 = a0 + (a1 - a0) * (k as f32) / (n as f32);
+		let u1 = a0 + (a1 - a0) * ((k + 1) as f32) / (n as f32);
+		quad(vs, pt(r0, u0), pt(r1, u0), pt(r1, u1), pt(r0, u1), ci, co, co, ci);
+	}
+}
+fn band1(vs TextVtx[>..]&, r0 f32, r1 f32, a0 f32, a1 f32, c byte[4]) {
+	band(vs, r0, r1, a0, a1, c, c);
+}
+fn disc(vs TextVtx[>..]&, x f32, y f32, r f32, c byte[4]) {
+	let ox = CX;
+	let oy = CY;
+	CX = x;
+	CY = y;
+	band1(vs, 0.0, r, 0.0, 6.2832, c);
+	CX = ox;
+	CY = oy;
+}
+fn seg(vs TextVtx[>..]&, p float2, q float2, w f32, c byte[4]) {
+	let dx = q.x - p.x;
+	let dy = q.y - p.y;
+	var len = sqrt(dx * dx + dy * dy) as f32;
+	if len <= 0.0 { len = 1.0; }
+	let nx = -dy / len * w * 0.5;
+	let ny = dx / len * w * 0.5;
+	flat_quad(vs, float2 { p.x - nx, p.y - ny }, float2 { q.x - nx, q.y - ny }, float2 { q.x + nx, q.y + ny }, float2 { p.x + nx, p.y + ny }, c);
+}
+fn spoke(vs TextVtx[>..]&, a f32, r0 f32, r1 f32, w f32, c byte[4]) {
+	seg(vs, pt(r0, a), pt(r1, a), w, c);
+}
+fn font_metrics() {
+	var list TextVtx[>..] = [];
+	let white byte[4] = [255, 255, 255, 255];
+	sdf_text(list, 0.0, 0.0, 100.0, "Hgjy|", white, 0, false);
+	if list.len == 0 { return; }
+	var lo = list[0].pos.y;
+	var hi = list[0].pos.y;
+	for v in list {
+		lo = min(lo, v.pos.y);
+		hi = max(hi, v.pos.y);
+	}
+	FY0 = lo / 100.0;
+	FY1 = hi / 100.0;
+	var caps TextVtx[>..] = [];
+	sdf_text(caps, 0.0, 0.0, 100.0, "H", white, 0, false);
+	if caps.len == 0 { return; }
+	var top = caps[0].pos.y;
+	var bottom = caps[0].pos.y;
+	for v in caps {
+		top = min(top, v.pos.y);
+		bottom = max(bottom, v.pos.y);
+	}
+	FC = (top + bottom) * 0.5 / 100.0;
+}
+fn line_h(s f32) f32 { (FY1 - FY0) * s * 1.12 }
+fn rich(vs TextVtx[>..]&, x f32, y f32, size f32, t const byte[:], c byte[4], weight f32, cw f32, draw bool) f32 {
+	var pen = x;
+	var code = false;
+	var bold = false;
+	var italic = false;
+	var strike = false;
+	var math_on = false;
+	var link = false;
+	var raised = false;
+	var lowered = false;
+	var cell = 0;
+	var st = 0;
+	for i in t.len + 1 {
+		var m = 0;
+		if i < t.len {
+			m = t[i] as int;
+			if (m < 1 || m > 8) && m != 9 { continue; }
+		}
+		if i > st {
+			var run_size f32 = size;
+			var top f32 = y;
+			if raised {
+				run_size = size * 0.7;
+				top = y - size * 0.15;
+			} else if lowered {
+				run_size = size * 0.7;
+				top = y + size * 0.5;
+			}
+			let run_w = sdf_text_w(t[st..i], run_size);
+			if code { pen += run_size * 0.18; }
+			if draw {
+				let alpha = (c[3] as f32) / 255.0;
+				var col byte[4] = c;
+				if link {
+					col = ac(1, alpha);
+					col[3] = c[3];
+				} else if math_on {
+					col = ac(5, alpha);
+					col[3] = c[3];
+				} else if code {
+					col = ac(0, alpha);
+					col[3] = c[3];
+				}
+				if bold {
+					let target f32 = if DARK { 255.0 } else { 0.0 };
+					for ch in 3 {
+						let v = col[ch] as f32;
+						let mixed = (v + (target - v) * 0.35) as int;
+						col[ch] = mixed as byte;
+					}
+				}
+				if code { sdf_rect(vs, pen - run_size * 0.14, top - run_size * 0.26, run_w + run_size * 0.28, run_size * 1.56, ac(0, alpha * 0.16)); }
+				let before = vs.len;
+				if bold || weight > 0.5 {
+					sdf_text(vs, pen, top, run_size, t[st..i], col, 1, false);
+				} else {
+					sdf_text(vs, pen, top, run_size, t[st..i], col, 0, false);
+				}
+				if italic {
+					for k in before..vs.len { vs[k].pos.x += (top + run_size - vs[k].pos.y) * 0.2; }
+				}
+				for k in before..vs.len {
+					if vs[k].col[0] == 0 && vs[k].col[1] == 0 && vs[k].col[2] == 0 { vs[k].col = shadow(alpha); }
+				}
+				if strike { sdf_rect(vs, pen, top + run_size * 0.58, run_w, max(1.0, run_size * 0.075), col); }
+				if link {
+					var under byte[4] = col;
+					under[3] = ((col[3] as f32) * 0.7) as int as byte;
+					sdf_rect(vs, pen, top + run_size * 1.14, run_w, max(1.0, run_size * 0.06), under);
+				}
+			}
+			pen += run_w;
+			if code { pen += run_size * 0.18; }
+		}
+		st = i + 1;
+		if m == 1 { code = !code; }
+		if m == 2 { bold = !bold; }
+		if m == 3 { italic = !italic; }
+		if m == 4 { strike = !strike; }
+		if m == 5 { math_on = !math_on; }
+		if m == 6 { link = !link; }
+		if m == 7 { raised = !raised; }
+		if m == 8 { lowered = !lowered; }
+		if m == 9 {
+			cell += 1;
+			pen = x + cw * (cell as f32);
+		}
+	}
+	pen - x
+}
+fn arctext(vs TextVtx[>..]&, t const byte[:], r f32, a f32, size f32, c byte[4], weight f32, tilt f32, centered bool, cw f32) f32 {
+	let first = vs.len;
+	let w = rich(vs, 0.0, 0.0, size, t, c, weight, cw, true);
+	let fl = (sin(a) as f32) > 0.25;
+	let hw = w * 0.5 / r;
+	let a0 = if fl && centered { a + hw } else if centered { a - hw } else { a };
+	for k in first..vs.len {
+		let p = vs[k].pos;
+		var q = if fl { pt(r - (FY1 * size - p.y) * tilt, a0 - p.x / r) } else { pt(r - (p.y - FY0 * size) * tilt, a0 + p.x / r) };
+		if WG > 0.0 {
+			let dx = q.x - BX;
+			let dy = q.y - BY;
+			let dist = sqrt(dx * dx + dy * dy) as f32;
+			let sw = WG * WG * 1.5 * (1.0 + 45.0 / (dist + 30.0));
+			let pl = 1.0 - (pow(WG, 1.1) as f32) * 0.97;
+			let co = cos(sw) as f32;
+			let si = sin(sw) as f32;
+			q = float2 { BX + (dx * co - dy * si) * pl, BY + (dx * si + dy * co) * pl * (1.0 - WG * 0.5) };
+		}
+		vs[k].pos = q;
+	}
+	if fl { a0 - w / r } else { a0 + w / r }
+}
+fn arc_mid(m f32, a f32, size f32) f32 {
+	if (sin(a) as f32) > 0.25 { m + (FY1 - FC) * size } else { m + (FC - FY0) * size }
+}
+fn flat(vs TextVtx[>..]&, x f32, y f32, size f32, t const byte[:], c byte[4], weight f32) f32 {
+	rich(vs, x, y, size, t, c, weight, 0.0, true)
+}
+fn build_logo() {
+	let png = embed_file("amniscient-logo.png");
+	var px byte[>..] = [];
+	let w, h, ok = codec_png::decode(png, px);
+	if !ok || w <= 0 || h <= 0 { return; }
+	let ch = px.len / (w * h);
+	if ch < 3 { return; }
+	for y in 112 {
+		for x in 112 {
+			var sr f32 = 0.0;
+			var sg f32 = 0.0;
+			var sb f32 = 0.0;
+			var lo f32 = 0.0;
+			for k in 4 {
+				let off = min(((y * h / 112 + k % 2 * 4) * w + x * w / 112 + k / 2 * 4) * ch, px.len - ch);
+				let r = (px[off] as f32) / 255.0;
+				let g = (px[off + 1] as f32) / 255.0;
+				let b = (px[off + 2] as f32) / 255.0;
+				sr += r * 0.25;
+				sg += g * 0.25;
+				sb += b * 0.25;
+				lo += (1.0 - min(r, min(g, b))) * 0.25;
+			}
+			let alpha = clamp(lo * 2.2, 0.0, 1.0);
+			if alpha < 0.05 { continue; }
+			let x0 = (x as f32) / 112.0 * 2.0 - 1.0;
+			let y0 = (y as f32) / 112.0 * 2.0 - 1.0;
+			let side f32 = 2.0 / 112.0;
+			flat_quad(LOGO, float2 { x0, y0 }, float2 { x0 + side, y0 }, float2 { x0 + side, y0 + side }, float2 { x0, y0 + side }, rgba(rgb(sr, sg, sb), alpha));
+		}
+	}
+}
+fn status(i int) byte[>..] {
+	if S[i].demo { return str("DEMO REPLAY  ·  recorded Claude Code run"); }
+	let p = S[i].p;
+	if !AV[p] {
+		if p == 0 { return str("no public Grok Bot API  ·  install the grok CLI to drive this sector"); }
+		return str(pexe(p), " not installed  ·  adapter ready");
+	}
+	if S[i].busy {
+		var out byte[>..] = [];
+		out.append(spinner(NOW));
+		out.push(' ');
+		if S[i].act.len > 0 { out.append(S[i].act[..]); } else { out.append("Working"); }
+		out.append("…");
+		if S[i].since >= 0.0 {
+			let waited = str("  ", (NOW - S[i].since) as int, " s");
+			out.append(waited);
+		}
+		return out;
+	}
+	str("live  ·  Enter sends")
+}
+fn tone(i int) int {
+	if S[i].demo { return 5; }
+	if !AV[S[i].p] { return 2; }
+	if S[i].busy { return 4; }
+	3
+}
+fn ctx_window(i int) real {
+	var wide = S[i].p == 2;
+	for k in S[i].model.len - 3 {
+		if S[i].model[k..k + 4] == "[1m]" { wide = true; }
+	}
+	if wide { 1000000.0 } else { 200000.0 }
+}
+fn ctx_frac(i int) f32 { clamp(S[i].ctx / ctx_window(i), 0.0, 1.0) as f32 }
+fn gauge(f f32, a f32) byte[4] {
+	if f < 0.5 { return ac(3, a); }
+	if f < 0.8 { return ac(4, a); }
+	return ac(2, a);
+}
+fn geometry() {
+	let a = span() * 0.5 * RAD;
+	S0 = clamp(hf() * 0.024, 13.0, 27.0);
+	R = hf() * 1.3 + wf() * 0.5 / (sin(a) as f32);
+	CX = wf() * 0.5;
+	CY = hf() * 0.935 - R;
+	let w = wf() * 0.78 / S0;
+	if abs(w - WRAPU) > 0.5 {
+		WRAPU = w;
+		for i in S.len { S[i].size = -1; }
+		refresh_all();
+	}
+}
+fn size_at(r f32) f32 { S0 * (exp(-(R - r) / (hf() * 1.7)) as f32) }
+fn hole_depth() f32 { hf() * 0.78 }
+fn hole_radius() f32 { hf() * 0.047 }
+fn gpu() {
+	if !READY {
+		PB = gfx::pipeline(embed_shader("shaders/screen.vert"), embed_shader("shaders/hole.frag"), gfx::PipelineDesc { .. });
+		PO = gfx::pipeline(embed_shader("shaders/screen.vert"), embed_shader("shaders/hole.frag"), gfx::PipelineDesc { blend: gfx::BLEND_PREMULTIPLIED, .. });
+		PD = gfx::pipeline(embed_shader("shaders/screen.vert"), embed_shader("shaders/post.frag"), gfx::PipelineDesc { .. });
+		PU = gfx::pipeline(embed_shader("shaders/screen.vert"), embed_shader("shaders/post.frag"), gfx::PipelineDesc { blend: gfx::BLEND_ADD, .. });
+		SM = gfx::sampler(gfx::LINEAR, gfx::CLAMP);
+		READY = true;
+	}
+	if TW != W || TH != H {
+		if TW > 0 {
+			gfx::release(SC);
+			for k in 4 { gfx::release(BL[k]); }
+		}
+		SC = gfx::render_target(W, H, gfx::RGBA16F);
+		var div = 2;
+		for k in 4 {
+			BL[k] = gfx::render_target(max(1, W / div), max(1, H / div), gfx::RGBA16F);
+			div *= 2;
+		}
+		TW = W;
+		TH = H;
+	}
+}
+fn now_mod() f32 { (NOW - (floor(NOW / 1000.0) as real) * 1000.0) as f32 }
+fn hole_pass(mode int) {
+	let clear = mode == 0;
+	guard gfx::begin_pass(gfx::PassDesc { color: [SC, gfx::Texture { 0 }, gfx::Texture { 0 }, gfx::Texture { 0 }], clear_color: clear, .. }) else { return; }
+	if mode == 0 { gfx::bind(PB); } else { gfx::bind(PO); }
+	let zero = float4 { 0.0, 0.0, 0.0, 0.0 };
+	let light f32 = if DARK { 0.0 } else { 1.0 };
+	let first = if NH > 0 { HX[0] } else { zero };
+	let second = if NH > 1 { HX[1] } else { zero };
+	let u = HoleU { a: float4 { wf(), hf(), now_mod(), light }, h0: first, h1: second, m: float4 { mode as f32, 0.27, 1.0, 0.0 } };
+	gfx::uniforms(gfx::FRAGMENT, 0, u);
+	gfx::draw(3);
+	gfx::end_pass();
+}
+fn post_pass(dst gfx::Texture, src gfx::Texture, glo gfx::Texture, mode int, k f32, add bool) {
+	let clear = !add;
+	guard gfx::begin_pass(gfx::PassDesc { color: [dst, gfx::Texture { 0 }, gfx::Texture { 0 }, gfx::Texture { 0 }], clear_color: clear, .. }) else { return; }
+	if add { gfx::bind(PU); } else { gfx::bind(PD); }
+	gfx::bind_texture(gfx::FRAGMENT, 0, src, SM);
+	gfx::bind_texture(gfx::FRAGMENT, 1, glo, SM);
+	let info = gfx::texture_info(src);
+	let light f32 = if DARK { 0.0 } else { 1.0 };
+	let grain f32 = if DARK { 0.022 } else { 0.0 };
+	let u = PostU { a: float4 { 1.0 / (info.width as f32), 1.0 / (info.height as f32), mode as f32, k }, b: float4 { now_mod(), 0.78, grain, light } };
+	gfx::uniforms(gfx::FRAGMENT, 0, u);
+	gfx::draw(3);
+	gfx::end_pass();
+}
+fn add_hole(x f32, y f32, radius f32, alpha f32) {
+	if NH < 2 {
+		HX[NH] = float4 { x, y, radius, alpha };
+		NH += 1;
+	} else {
+		let j = if HX[0].w <= HX[1].w { 0 } else { 1 };
+		if alpha > HX[j].w { HX[j] = float4 { x, y, radius, alpha }; }
+	}
+}
+fn crawl(va TextVtx[>..]&, i int, c f32, a f32) {
+	let hh = hf();
+	let r0 = R - S0 * 1.75;
+	let n = visible(i);
+	let me f32 = if i == CUR { 1.0 } else { 0.0 };
+	let back = if i == CUR { VIEW } else { 0 };
+	let hole = pt(R - hh * 0.78, c);
+	BX = hole.x;
+	BY = hole.y;
+	add_hole(BX, BY, hh * 0.047, a);
+	var rr = r0 - S0 * 2.3 + (SCROLL + VIEWF - (VIEW as f32)) * line_h(S0) * me;
+	let bw = WRAPU * S0 * 0.5;
+	let left = c + bw * 0.9 / r0;
+	for k in 240 {
+		let at = n - 1 - back - k;
+		if at < 0 { break; }
+		let l = line(i, at);
+		if l.len == 0 { continue; }
+		let kd = l[0];
+		let x = l[1..l.len];
+		let f = (R - rr) / (hh * 0.78);
+		if f > 1.0 { break; }
+		let grow f32 = if kd == 'h' { 1.32 } else if kd == 'g' { 1.16 } else if kd == 'j' { 1.04 } else if kd == 'M' { 1.1 } else if kd == 'k' { 0.92 } else if kd == 'm' { 0.87 } else { 1.0 };
+		let size = size_at(rr) * grow;
+		WG = clamp((f - 0.58) / 0.42, 0.0, 1.0);
+		let fade = a * (1.0 - WG * WG * WG) * clamp((r0 - S0 * 1.47 - rr) / (S0 * 0.83), 0.0, 1.0);
+		var base = theme3(1);
+		var alpha = fade;
+		if kd == 'u' || kd == 'h' || kd == 'g' || kd == 'H' {
+			base = theme3(2);
+		} else if kd == 't' {
+			base = accent3(1);
+		} else if kd == 'e' {
+			base = accent3(2);
+		} else if kd == 'c' {
+			base = accent3(0);
+		} else if kd == 'm' {
+			base = theme3(3);
+			alpha = fade * 0.8;
+		} else if kd == 'q' {
+			base = theme3(3);
+		} else if kd == 'k' {
+			base = theme3(3);
+			alpha = fade * 0.62;
+		} else if kd == 'M' {
+			base = accent3(5);
+		}
+		let ember = pick(rgb(1.0, 0.42, 0.18), rgb(0.55, 0.2, 0.1));
+		let col = rgba(mix3(base, ember, WG * 0.8), alpha);
+		let weight f32 = if kd == 'u' || kd == 'h' || kd == 'g' || kd == 'j' || kd == 'H' { 1.0 } else { 0.0 };
+		let tilt = 0.75 + 0.25 * (1.0 - f);
+		let solid = fade * (1.0 - WG) * (1.0 - WG) * (1.0 - WG);
+		if fade > 0.01 {
+			if kd == 'r' {
+				let half = bw * size / S0 * 0.8 / rr;
+				band1(va, rr - size * 0.5, rr - size * 0.43, c - half, c + half, tc(2, solid * 0.35));
+			} else if kd == 'c' {
+				let half = (bw * 0.9 + S0 * 0.6) / r0;
+				var back_col byte[4] = rgba(rgb(0.07, 0.09, 0.14), solid * 0.85);
+				if !DARK { back_col = rgba(rgb(0.9, 0.87, 0.8), solid * 0.85); }
+				band1(va, rr - line_h(size), rr, c - half, c + half, back_col);
+				band1(va, rr - line_h(size), rr, c + half - 3.0 / r0, c + half, ac(0, solid * 0.8));
+				arctext(va, x, rr, left, size, col, weight, tilt, false, 0.0);
+			} else if kd == 'b' || kd == 'H' {
+				var tabs = 0;
+				for b in x {
+					if b == 9 { tabs += 1; }
+				}
+				let cw = WRAPU * S0 * 0.9 / ((tabs + 1) as f32);
+				let half = bw * 0.9 / r0;
+				arctext(va, x, rr, left, size, col, weight, tilt, false, cw);
+				if kd == 'H' { band1(va, rr + size * 0.12, rr + size * 0.19, c - half, c + half, tc(2, solid * 0.45)); }
+			} else if kd == 'h' {
+				let half = bw * 0.9 / r0;
+				band1(va, rr + size * 0.1, rr + size * 0.15, c - half, c + half, tc(2, solid * 0.3));
+				arctext(va, x, rr, left, size, col, weight, tilt, false, 0.0);
+			} else if kd == 'q' {
+				band1(va, rr - line_h(size), rr, left - 2.5 / r0, left, tc(2, solid * 0.6));
+				arctext(va, x, rr, left - S0 * 0.9 / r0, size, col, weight, tilt, false, 0.0);
+			} else if x.len > 0 {
+				var shown byte[>..] = [];
+				var lead = true;
+				if at > 0 {
+					let prior = line(i, at - 1);
+					lead = prior.len == 0 || prior[0] != kd;
+				}
+				if lead || kd == 't' {
+					if kd == 'u' {
+						shown.append("› ");
+					} else if kd == 't' {
+						shown.append("→ ");
+					} else if kd == 'e' {
+						shown.append("× ");
+					}
+				}
+				shown.append(x);
+				if kd == 'u' || kd == 'm' || kd == 'M' {
+					arctext(va, shown, rr, c, size, col, weight, tilt, true, 0.0);
+				} else {
+					arctext(va, shown, rr, left, size, col, weight, tilt, false, 0.0);
+				}
+			}
+		}
+		let step f32 = if l == "p" { 0.55 } else if kd == 'h' || kd == 'g' { 1.3 } else { 1.0 };
+		rr -= line_h(size) * step;
+	}
+	WG = 0.0;
+}
+fn prompt(vb TextVtx[>..]&, i int, c f32, a f32) {
+	let p = S[i].p;
+	let live = AV[p] && !S[i].demo;
+	let hw = span() * 0.5 * RAD;
+	let r0 = R - S0 * 1.75;
+	let ps = S0 * 1.05;
+	let inner = r0 - ps * 1.4;
+	let outer = r0 + ps * 0.5;
+	let tm = (inner + outer) * 0.5 - ps * 0.1;
+	let tr = arc_mid(tm, c, ps);
+	let th = min(hw * 0.9, wf() * 0.42 / r0);
+	var track byte[4] = tc(4, a * 0.72);
+	if !DARK { track = rgba(rgb(1.0, 1.0, 1.0), a * 0.75); }
+	band1(vb, inner, outer, c - th, c + th, track);
+	band1(vb, inner - 1.0, inner + 1.0, c - th, c + th, tc(2, a * 0.55));
+	band1(vb, outer - 1.5, outer + 1.5, c - th, c + th, tc(2, a * 0.9));
+	if live && i == CUR {
+		var e f32 = 0.0;
+		var caret = true;
+		if INPUT.len == 0 && S[i].busy {
+			let st = status(i);
+			let pulse = 0.78 + 0.22 * (sin(NOW * 3.0) as f32);
+			arctext(vb, st, tr, c, ps, ac(4, a * pulse), 0.0, 1.0, true, 0.0);
+			caret = false;
+		} else if INPUT.len == 0 {
+			let ask = str("› Ask ", pname(p), " anything…");
+			let end = arctext(vb, ask, tr, c, ps, tc(3, a * 0.8), 0.0, 1.0, true, 0.0);
+			e = (2.0 * c - end) - sdf_text_w("› ", ps) / tr;
+		} else {
+			var typed byte[>..] = [];
+			typed.append("› ");
+			for b in INPUT {
+				if b == '\n' { typed.push(' '); } else { typed.push(b); }
+			}
+			e = arctext(vb, typed, tr, c, ps, tc(2, a), 1.0, 1.0, true, 0.0);
+		}
+		if caret {
+			let blink = 0.55 + 0.45 * (cos(NOW * 5.5) as f32);
+			spoke(vb, e, tm - ps * 0.57, tm + ps * 0.7, 2.5, tc(2, a * blink));
+		}
+	} else if live {
+		arctext(vb, "› ", tr, c, ps, tc(2, a), 1.0, 1.0, true, 0.0);
+	} else {
+		let st = status(i);
+		arctext(vb, st, arc_mid(tm, c, S0 * 0.9), c, S0 * 0.9, ac(tone(i), a), 0.0, 1.0, true, 0.0);
+	}
+}
+fn thin(out byte[>..]&) {
+	out.push(226);
+	out.push(128);
+	out.push(137);
+}
+fn frac_of(t real) f32 { (t - (floor(t) as real)) as f32 }
+fn rim(vs TextVtx[>..]&, c f32, hw f32, q int, on bool, busy bool) {
+	let bw = hf() * 0.05;
+	let gold = pick(rgb(1.0, 0.82, 0.45), rgb(0.72, 0.52, 0.16));
+	let lo = c - hw;
+	let hi = c + hw;
+	for k in 12 {
+		let fall = 1.0 - (k as f32) / 12.0;
+		let base f32 = if DARK { 0.22 } else { 0.12 };
+		band1(vs, R - ((k + 1) as f32) * 3.0, R - (k as f32) * 3.0, lo, hi, rgba(gold, base * fall * fall));
+	}
+	for k in 7 {
+		let u = ((k as f32) + 0.5) / 7.0;
+		let v = 1.0 - abs(2.0 * u - 1.0);
+		let t = v * 0.8 + 0.2 * (1.0 - u);
+		let from_col = pick(rgb(0.10, 0.12, 0.17), rgb(0.80, 0.74, 0.62));
+		let to_col = pick(rgb(0.27, 0.30, 0.37), rgb(0.97, 0.94, 0.87));
+		band1(vs, R + bw * (k as f32) / 7.0, R + bw * ((k + 1) as f32) / 7.0, lo, hi, rgba(mix3(from_col, to_col, t), 0.97));
+	}
+	let tint f32 = if on { 0.33 } else { 0.2 };
+	band1(vs, R + bw * 0.58, R + bw * 0.9, lo, hi, rgba(plat3(q), tint));
+	let gloss f32 = if DARK { 0.07 } else { 0.3 };
+	band1(vs, R + 1.0, R + bw * 0.22, lo, hi, rgba(rgb(1.0, 1.0, 1.0), gloss));
+	band1(vs, R - 1.0, R + 1.5, lo, hi, rgba(gold, 1.0));
+	band1(vs, R + bw * 0.5 - 0.5, R + bw * 0.5 + 0.5, lo, hi, rgba(gold, 0.25));
+	band1(vs, R + bw - 1.0, R + bw + 1.0, lo, hi, rgba(gold, 0.75));
+	for k in 7 {
+		let base f32 = if DARK { 0.35 } else { 0.08 };
+		band1(vs, R + bw + (k as f32) * 3.0, R + bw + ((k + 1) as f32) * 3.0, lo, hi, rgba(rgb(0.0, 0.0, 0.0), base * (1.0 - (k as f32) / 7.0)));
+	}
+	let sc = lo + frac_of(NOW * 0.15) * 2.0 * hw;
+	for k in 15 {
+		let d = ((k - 7) as f32) / 7.0;
+		let a0 = sc + d * 0.035;
+		band1(vs, R, R + bw, a0, a0 + 0.0048, rgba(rgb(1.0, 0.97, 0.88), 0.22 * (1.0 - d * d)));
+	}
+	let tk f32 = 0.0087;
+	var a = lo - (lo - (floor(lo / tk) as f32) * tk);
+	while a < hi {
+		let big = abs(a / tk - (floor(a / tk / 5.0) as f32) * 5.0) < 0.5;
+		let reach f32 = if big { 0.32 } else { 0.2 };
+		let strength f32 = if big { 0.5 } else { 0.28 };
+		spoke(vs, a, R + 2.0, R + bw * reach, 1.0, rgba(gold, strength));
+		a += tk;
+	}
+	var label byte[>..] = [];
+	let name = pname(q);
+	for ch, k in name {
+		if ch >= 'a' && ch <= 'z' { label.push(ch - 32); } else { label.push(ch); }
+		if k < name.len - 1 { thin(label); }
+	}
+	let shown = if on || S[CUR].p == q { rank(CUR) + 1 } else { 1 };
+	format(label, "   ·   ", shown, " / ", cnt(q));
+	let ls = S0 * 0.62;
+	var ink byte[4] = rgba(rgb(1.0, 0.97, 0.9), 1.0);
+	if !DARK { ink = tc(1, 1.0); }
+	arctext(vs, label, arc_mid(R + bw * 0.5, c, ls), c, ls, ink, 1.0, 1.0, true, 0.0);
+	if on && S[CUR].ctx > 0.0 {
+		let f = ctx_frac(CUR);
+		let hm = min(hw, wf() * 0.4 / R);
+		let e = c + hm;
+		let shade f32 = if DARK { 0.35 } else { 0.12 };
+		band1(vs, R + bw * 0.8, R + bw * 0.92, c - hm, e, rgba(rgb(0.0, 0.0, 0.0), shade));
+		band1(vs, R + bw * 0.8, R + bw * 0.92, e - f * hm * 2.0, e, gauge(f, 0.9));
+		let tip = pt(R + bw * 0.86, e - f * hm * 2.0);
+		disc(vs, tip.x, tip.y, 3.5, gauge(f, 1.0));
+	}
+	if busy {
+		let head = lo + frac_of(NOW * 0.23) * 2.0 * hw;
+		for k in 14 {
+			let fall = 1.0 - (k as f32) / 14.0;
+			let p = pt(R, head - (k as f32) * 0.0035);
+			disc(vs, p.x, p.y, 3.5 * fall + 0.8, rgba(rgb(1.0, 0.93, 0.75), fall * fall));
+		}
+	}
+}
+let TAB_W f32 = 172.0;
+let TAB_H f32 = 30.0;
+let TAB_SKEW f32 = 7.0;
+let PLUS_W f32 = 30.0;
+fn tab_x() f32 { wf() - TAB_W - 24.0 }
+fn tab_y(q int) f32 { 18.0 + (q as f32) * 38.0 }
+fn arrow_x(s int) f32 { if s == 0 { 44.0 } else { wf() - 44.0 } }
+fn arrow_y() f32 { hf() * 0.55 }
+fn legend_key(k int) const byte[:] {
+	match k {
+		0 => "← →",
+		1 => "1–4",
+		2 => "+",
+		3 => "Ctrl T",
+		4 => "↑ ↓",
+		_ => "Enter",
+	}
+}
+fn legend_label(k int) const byte[:] {
+	match k {
+		0 => "session",
+		1 => "platform",
+		2 => "new",
+		3 => "theme",
+		4 => "scroll",
+		_ => "send",
+	}
+}
+fn legend(vs TextVtx[>..]&, x f32, y f32) {
+	var at = x;
+	for k in 6 {
+		let key = legend_key(k);
+		let label = legend_label(k);
+		let w = sdf_text_w(key, 9.0) + 10.0;
+		sdf_rect(vs, at, y, w, 15.0, tc(2, 0.45));
+		sdf_rect(vs, at + 1.0, y + 1.0, w - 2.0, 13.0, tc(4, 0.9));
+		flat(vs, at + 5.0, y + 3.5, 9.0, key, tc(1, 0.9), 1.0);
+		flat(vs, at + w + 5.0, y + 3.5, 9.0, label, tc(3, 0.85), 0.0);
+		at += w + 5.0 + sdf_text_w(label, 9.0) + 10.0;
+	}
+}
+fn chip(vs TextVtx[>..]&, x f32, y f32, l const byte[:], v const byte[:], k byte[4], m f32) f32 {
+	let lw = sdf_text_w(l, 8.0);
+	let vw = sdf_text_w(v, 10.0);
+	var w = lw + vw + 22.0;
+	if m >= 0.0 { w += 63.0; }
+	var edge byte[4] = k;
+	edge[3] = channel(0.42);
+	sdf_rect(vs, x, y, w, 19.0, edge);
+	sdf_rect(vs, x + 1.0, y + 1.0, w - 2.0, 17.0, tc(4, 0.92));
+	flat(vs, x + 7.0, y + 6.0, 8.0, l, tc(3, 0.85), 1.0);
+	flat(vs, x + lw + 14.0, y + 4.5, 10.0, v, k, 1.0);
+	if m >= 0.0 {
+		sdf_rect(vs, x + lw + vw + 22.0, y + 8.0, 56.0, 3.5, tc(3, 0.28));
+		sdf_rect(vs, x + lw + vw + 22.0, y + 8.0, 56.0 * m, 3.5, k);
+	}
+	x + w + 7.0
+}
+fn chips(vs TextVtx[>..]&) {
+	var x f32 = 70.0;
+	let y f32 = 77.0;
+	if S[CUR].model.len > 0 {
+		var from = 0;
+		if starts_with(S[CUR].model[..], "claude-") { from = 7; }
+		x = chip(vs, x, y, "MODEL", S[CUR].model[from..S[CUR].model.len], tc(2, 1.0), -1.0);
+	}
+	if S[CUR].ctx > 0.0 {
+		let f = ctx_frac(CUR);
+		let used = compact(S[CUR].ctx);
+		let room = compact(ctx_window(CUR));
+		let text = str((f * 100.0) as int, "%  ", used, " / ", room);
+		x = chip(vs, x, y, "CONTEXT", text, gauge(f, 1.0), f);
+	}
+	if S[CUR].cost > 0.0 || S[CUR].turns > 0 {
+		var spent byte[>..] = [];
+		let money = fixed_dec(S[CUR].cost, 2);
+		format(spent, "$", money);
+		if S[CUR].turns > 0 {
+			spent.append("  ·  ");
+			format(spent, S[CUR].turns);
+			if S[CUR].turns == 1 { spent.append(" turn"); } else { spent.append(" turns"); }
+		}
+		if S[CUR].out_tok > 0.0 {
+			let made = compact(S[CUR].out_tok);
+			format(spent, "  ·  ", made, " out");
+		}
+		x = chip(vs, x, y, "SPENT", spent, tc(1, 1.0), -1.0);
+	}
+	if S[CUR].mode.len > 0 { x = chip(vs, x, y, "MODE", S[CUR].mode[..], ac(1, 1.0), -1.0); }
+}
+fn hud(vs TextVtx[>..]&) {
+	for v in LOGO {
+		var u = v;
+		u.pos = float2 { 40.0 + v.pos.x * 20.0, 38.0 + v.pos.y * 20.0 };
+		vs.push(u);
+	}
+	var title byte[>..] = [];
+	title.push('A');
+	thin(title);
+	title.push('M');
+	thin(title);
+	title.push('N');
+	thin(title);
+	title.append("I   D");
+	thin(title);
+	title.push('I');
+	thin(title);
+	title.push('A');
+	thin(title);
+	title.push('L');
+	flat(vs, 70.0, 20.0, 15.0, title, tc(2, 1.0), 1.0);
+	let t = tone(CUR);
+	var pulse f32 = 1.0;
+	if S[CUR].busy { pulse = 0.55 + 0.45 * (sin(NOW * 4.0) as f32); }
+	disc(vs, 75.0, 49.0, 7.0, ac(t, 0.18 * pulse));
+	disc(vs, 75.0, 49.0, 3.5, ac(t, pulse));
+	let st = status(CUR);
+	flat(vs, 85.0, 44.0, 10.5, st, tc(1, 0.85), 0.0);
+	var path byte[>..] = [];
+	if S[CUR].cwd.len > 0 {
+		let shown = tilde(S[CUR].cwd);
+		path.append(shown);
+	} else {
+		let shown = tilde(S[CUR].dir);
+		path.append(shown);
+	}
+	if path.len > 48 {
+		var short byte[>..] = [];
+		short.append("…/");
+		let parts = split(path, '/');
+		let total = parts.len;
+		for part, k in parts {
+			if k >= total - 3 {
+				if k > 0 && k > total - 3 { short.push('/'); }
+				short.append(part);
+			}
+		}
+		path.clear();
+		path.append(short);
+	}
+	if S[CUR].sid.len > 0 {
+		path.append("  ·  session ");
+		path.append(S[CUR].sid[..min(8, S[CUR].sid.len)]);
+	}
+	flat(vs, 70.0, 62.0, 9.0, path, tc(3, 0.8), 0.0);
+	chips(vs);
+	legend(vs, 20.0, 109.0);
+	for s in 2 {
+		let d f32 = if s == 0 { -1.0 } else { 1.0 };
+		let ax = arrow_x(s);
+		let ay = arrow_y();
+		for k in 5 { disc(vs, ax, ay, 30.0 - (k as f32) * 2.0, tc(2, 0.04)); }
+		disc(vs, ax, ay, 23.0, tc(2, 0.75));
+		let face f32 = if DARK { 0.92 } else { 1.0 };
+		disc(vs, ax, ay, 21.5, tc(4, face));
+		seg(vs, float2 { ax + d * 4.0, ay }, float2 { ax - d * 4.0, ay - 8.0 }, 3.0, tc(2, 1.0));
+		seg(vs, float2 { ax + d * 4.0, ay }, float2 { ax - d * 4.0, ay + 8.0 }, 3.0, tc(2, 1.0));
+	}
+	for q in 4 {
+		let on = q == S[CUR].p;
+		let x0 = tab_x();
+		let y = tab_y(q);
+		let p0 = float2 { x0 + 7.0, y };
+		let p1 = float2 { x0 + 179.0, y };
+		let p2 = float2 { x0 + 172.0, y + 30.0 };
+		let p3 = float2 { x0, y + 30.0 };
+		let e0 = float2 { x0 + 5.5, y - 1.5 };
+		let e1 = float2 { x0 + 180.5, y - 1.5 };
+		let e2 = float2 { x0 + 173.5, y + 31.5 };
+		let e3 = float2 { x0 - 1.5, y + 31.5 };
+		if on {
+			flat_quad(vs, e0, e1, e2, e3, tc(2, 1.0));
+			flat_quad(vs, p0, p1, p2, p3, tc(2, 0.95));
+		} else {
+			flat_quad(vs, e0, e1, e2, e3, tc(2, 0.3));
+			let body f32 = if DARK { 0.78 } else { 0.96 };
+			flat_quad(vs, p0, p1, p2, p3, tc(4, body));
+		}
+		flat_quad(vs, float2 { x0 + 7.0, y }, float2 { x0 + 11.0, y }, float2 { x0 + 4.0, y + 30.0 }, float2 { x0, y + 30.0 }, rgba(plat3(q), 1.0));
+		var ink byte[4] = tc(0, 1.0);
+		if !on {
+			let strength f32 = if AV[q] { 1.0 } else { 0.45 };
+			ink = tc(1, strength);
+		}
+		let num = str(q + 1);
+		flat(vs, x0 + 16.0, y + 10.0, 10.5, num, ink, 1.0);
+		flat(vs, x0 + 31.0, y + 10.0, 10.5, pname(q), ink, 1.0);
+		var plus byte[4] = tc(2, 1.0);
+		if on { plus = tc(0, 1.0); }
+		flat(vs, x0 + 152.0, y + 8.0, 12.0, "+", plus, 1.0);
+		for k in cnt(q) {
+			let j = nth(q, k);
+			let radius f32 = if j == CUR { 3.5 } else { 2.3 };
+			var dot byte[4] = tc(2, 0.45);
+			if S[j].busy {
+				dot = ac(4, 1.0);
+			} else if j == CUR {
+				dot = tc(2, 1.0);
+			}
+			disc(vs, x0 - 12.0 - (k as f32) * 10.0, y + 15.0, radius, dot);
+		}
+	}
+}
+fn render(out gfx::Texture) {
+	gpu();
+	geometry();
+	let hw = span() * 0.5 * RAD;
+	let rb = R - hf() * 0.8;
+	let front f32 = 1.5708;
+	let spinning = abs(ROT - ROT1) > 0.01;
+	NH = 0;
+	var va TextVtx[>..] = [];
+	var vb TextVtx[>..] = [];
+	var vh TextVtx[>..] = [];
+	for i in S.len {
+		let c = ang(center(i));
+		let d = abs(wrap_deg((c - front) / RAD)) * RAD;
+		if d > hw * 2.7 { continue; }
+		let p = S[i].p;
+		var strength f32 = 0.55;
+		if !DARK { strength *= 0.85; }
+		if i != CUR { strength *= 0.7; }
+		for k in 7 {
+			let r0 = rb + (R - rb) * (k as f32) / 7.0;
+			let r1 = rb + (R - rb) * ((k + 1) as f32) / 7.0;
+			band(va, r0, r1, c - hw, c + hw, tc(4, strength * (k as f32) / 7.0), tc(4, strength * ((k + 1) as f32) / 7.0));
+		}
+		band(va, R - hf() * 0.25, R, c - hw, c + hw, rgba(plat3(p), 0.0), rgba(plat3(p), 0.07));
+		if i == CUR || (spinning && d < hw * 2.0) {
+			let alpha = if i == CUR { 1.0 } else { clamp(1.0 - d / (hw * 2.0), 0.0, 1.0) };
+			crawl(va, i, c, alpha);
+			prompt(vb, i, c, alpha);
+		}
+		rim(vb, c, hw, p, i == CUR, S[i].busy);
+		for e in 2 {
+			let edge = if e == 0 { c - hw } else { c + hw };
+			band(vb, rb, R + hf() * 0.05, edge - 3.5 / R, edge + 3.5 / R, tc(2, 0.0), tc(2, 0.1));
+			band(vb, rb, R + hf() * 0.05, edge - 0.75 / R, edge + 0.75 / R, tc(2, 0.0), tc(2, 0.7));
+		}
+	}
+	hud(vh);
+	hole_pass(0);
+	sdf_draw(SC, W, H, va);
+	hole_pass(1);
+	sdf_draw(SC, W, H, vb);
+	if DARK {
+		post_pass(BL[0], SC, SC, 0, 1.0, false);
+		for k in 1..4 { post_pass(BL[k], BL[k - 1], BL[k - 1], 1, 1.0, false); }
+		var k = 3;
+		while k >= 1 {
+			post_pass(BL[k - 1], BL[k], BL[k], 2, 1.0, true);
+			k -= 1;
+		}
+	}
+	let glow f32 = if DARK { 0.9 } else { 0.0 };
+	post_pass(out, SC, BL[0], 3, glow, false);
+	sdf_draw(out, W, H, vh);
+}
+var TICK int = -1;
+fn update(dt real) {
+	let tick = floor(NOW * 4.0) as int;
+	if tick != TICK {
+		TICK = tick;
+		refresh_all();
+	}
+	let u real = clamp((NOW - T0) / SPIN, 0.0, 1.0);
+	var e real = 4.0 * u * u * u;
+	if u >= 0.5 { e = 1.0 - (pow(-2.0 * u + 2.0, 3.0) as real) / 2.0; }
+	ROT = ROT0 + (ROT1 - ROT0) * (e as f32);
+	let n = visible(CUR);
+	if n > S[CUR].shown { SCROLL = min(SCROLL + ((n - S[CUR].shown) as f32), 7.0); }
+	S[CUR].shown = n;
+	SCROLL = SCROLL * (exp(-7.0 * dt) as f32);
+	VIEWT = clamp(VIEWT, 0.0, max(0, S[CUR].count - 1) as f32);
+	VIEWF += (VIEWT - VIEWF) * (1.0 - (exp(-14.0 * dt) as f32));
+	if abs(VIEWT - VIEWF) < 0.002 { VIEWF = VIEWT; }
+	VIEW = floor(VIEWF) as int;
+}
+fn click(m float2) {
+	for s in 2 {
+		if abs(m.x - arrow_x(s)) < 26.0 && abs(m.y - arrow_y()) < 26.0 {
+			let dir = if s == 0 { -1 } else { 1 };
+			step_by(dir);
+			return;
+		}
+	}
+	for q in 4 {
+		let x0 = tab_x();
+		let y = tab_y(q);
+		if m.x >= x0 && m.x < x0 + 179.0 && m.y >= y && m.y < y + 30.0 {
+			if m.x >= x0 + 149.0 {
+				let made = make_session(q);
+				go_to(made);
+			} else {
+				go_to(LASTP[q]);
+			}
+			return;
+		}
+	}
+}
+fn type_cp(cp int) {
+	if cp < 128 {
+		INPUT.push(cp as byte);
+	} else if cp < 2048 {
+		INPUT.push((192 + cp / 64) as byte);
+		INPUT.push((128 + cp % 64) as byte);
+	} else if cp < 65536 {
+		INPUT.push((224 + cp / 4096) as byte);
+		INPUT.push((128 + (cp / 64) % 64) as byte);
+		INPUT.push((128 + cp % 64) as byte);
+	} else {
+		INPUT.push((240 + cp / 262144) as byte);
+		INPUT.push((128 + (cp / 4096) % 64) as byte);
+		INPUT.push((128 + (cp / 64) % 64) as byte);
+		INPUT.push((128 + cp % 64) as byte);
+	}
+}
+fn rub_out() {
+	if INPUT.len == 0 { return; }
+	while INPUT.len > 0 && INPUT[INPUT.len - 1] >= 128 && INPUT[INPUT.len - 1] < 192 { INPUT.pop(); }
+	if INPUT.len > 0 { INPUT.pop(); }
+}
+fn paste() {
+	let clip = gfx::clipboard();
+	for b in clip {
+		if b == 13 { continue; }
+		if b == 10 || b == 9 { INPUT.push(' '); } else { INPUT.push(b); }
+	}
+}
+fn new_here() {
+	let made = make_session(S[CUR].p);
+	go_to(made);
+}
+fn interactive() {
+	if !gfx::open("Amni Dial", W, H, gfx::WINDOW_RESIZABLE as int) {
+		print("no window: ", gfx::error());
+		return;
+	}
+	gfx::text_input(true);
+	var last = gfx::time();
+	while gfx::frame() {
+		NOW = gfx::time();
+		let screen = gfx::screen_size();
+		W = screen.x as int;
+		H = screen.y as int;
+		let ctrl = gfx::key_down("Left Ctrl") || gfx::key_down("Right Ctrl");
+		for ev in gfx::events() {
+			if ev.kind == 2 && !ctrl {
+				let c = ev.codepoint as int;
+				if INPUT.len == 0 && c >= 49 && c <= 52 {
+					go_to(LASTP[c - 49]);
+				} else if INPUT.len == 0 && c == 43 {
+					new_here();
+				} else if c >= 32 {
+					type_cp(c);
+				}
+			}
+			if ev.kind == 1 && ev.down && ev.scancode == gfx::scancode("Backspace") as i32 { rub_out(); }
+		}
+		if gfx::key_pressed("Left") { step_by(-1); }
+		if gfx::key_pressed("Right") { step_by(1); }
+		let dt = NOW - last;
+		if gfx::key_pressed("Up") { VIEWT += 1.0; }
+		if gfx::key_pressed("Down") { VIEWT -= 1.0; }
+		if gfx::key_pressed("PageUp") { VIEWT += 12.0; }
+		if gfx::key_pressed("PageDown") { VIEWT -= 12.0; }
+		if gfx::key_pressed("End") { VIEWT = 0.0; }
+		if gfx::key_pressed("Home") { VIEWT = S[CUR].count as f32; }
+		if gfx::key_down("Up") { VIEWT += (21.0 * dt) as f32; }
+		if gfx::key_down("Down") { VIEWT -= (21.0 * dt) as f32; }
+		if gfx::key_pressed("Return") { send(); }
+		if ctrl && gfx::key_pressed("N") { new_here(); }
+		if ctrl && gfx::key_pressed("T") { DARK = !DARK; }
+		if ctrl && gfx::key_pressed("V") { paste(); }
+		if gfx::key_pressed("Escape") { gfx::quit(); }
+		let wh = gfx::mouse_wheel();
+		VIEWT += (wh * 2.5) as f32;
+		if gfx::mouse_pressed(1) { click(gfx::mouse_pos()); }
+		update(NOW - last);
+		last = NOW;
+		render(gfx::screen());
+	}
+	gfx::close();
+}
+fn shot(rt gfx::Texture, dir const byte[:], name const byte[:]) {
+	update(1.0 / 30.0);
+	render(rt);
+	gfx::save_png(rt, str(dir, "/", name));
+}
+fn film(rt gfx::Texture, dir const byte[:], n int) {
+	for f in n {
+		NOW += 1.0 / 30.0;
+		update(1.0 / 30.0);
+		if FRAMES {
+			render(rt);
+			let num = str(FR);
+			var path byte[>..] = [];
+			format(path, dir, "/frames/f");
+			for z in 4 - num.len { path.push('0'); }
+			format(path, num, ".png");
+			gfx::save_png(rt, path);
+			FR += 1;
+			gfx::flush();
+		}
+	}
+}
+fn any_busy() bool {
+	for i in S.len {
+		if S[i].busy { return true; }
+	}
+	false
+}
+fn ask_text(k int) const byte[:] {
+	match k {
+		0 => "In 7 short lines: what makes a polar UI readable?",
+		1 => "Write a 12 line Helium-style haiku sequence about a spinning dial of agents.",
+		_ => "List 7 terse tips for driving several coding agents at once.",
+	}
+}
+fn pin(j int) {
+	go_to(j);
+	ROT0 = ROT1;
+	ROT = ROT1;
+	T0 = -9.0;
+}
+fn shots(dir const byte[:]) {
+	run_command(str("mkdir -p '", dir, "/frames'"));
+	if !gfx::open_headless(W, H) {
+		print("no gpu: ", gfx::error());
+		return;
+	}
+	let rt = gfx::render_target(W, H, gfx::RGBA8);
+	if AV[3] {
+		for k in 3 {
+			let i = if k < cnt(3) { nth(3, k) } else { make_session(3) };
+			refresh(i);
+			if S[i].count == 0 {
+				CUR = i;
+				INPUT.clear();
+				INPUT.append(ask_text(k));
+				send();
+			}
+		}
+	}
+	for round_no in 240 {
+		if !any_busy() { break; }
+		refresh_all();
+		sleep_ms(500);
+	}
+	for i in S.len { S[i].size = -1; }
+	refresh_all();
+	let cc = nth(1, 0);
+	go_to(cc);
+	ROT0 = ROT1;
+	ROT = ROT1;
+	T0 = -9.0;
+	shot(rt, dir, "dial-rest.png");
+	HIDE = min(S[cc].count, 34);
+	S[cc].shown = visible(cc);
+	SCROLL = 0.0;
+	film(rt, dir, 7);
+	while HIDE > 0 {
+		HIDE -= 1;
+		film(rt, dir, 4);
+	}
+	film(rt, dir, 42);
+	shot(rt, dir, "dial-crawl.png");
+	INPUT.clear();
+	INPUT.append("Refactor the crawl so code blocks keep their indentation");
+	shot(rt, dir, "dial-typing.png");
+	INPUT.clear();
+	VIEWT = 21.0;
+	film(rt, dir, 21);
+	shot(rt, dir, "dial-history.png");
+	VIEWT = 14.0;
+	film(rt, dir, 21);
+	shot(rt, dir, "dial-table.png");
+	VIEWT = 0.0;
+	film(rt, dir, 21);
+	let busy_one = nth(1, 1);
+	if busy_one >= 0 {
+		write_file(str(S[busy_one].dir, "/busy"), "1");
+		pin(busy_one);
+		refresh(busy_one);
+		NOW += 12.3;
+		S[busy_one].since = NOW - 12.3;
+		film(rt, dir, 7);
+		shot(rt, dir, "dial-busy.png");
+		run_command(str("rm -f '", S[busy_one].dir, "/busy'"));
+		refresh(busy_one);
+	}
+	let formatted = nth(1, 2);
+	if formatted >= 0 {
+		pin(formatted);
+		film(rt, dir, 7);
+		shot(rt, dir, "dial-format.png");
+		VIEWT = 11.0;
+		film(rt, dir, 21);
+		shot(rt, dir, "dial-format-top.png");
+		VIEWT = 0.0;
+	}
+	pin(cc);
+	go_to(nth(3, 0));
+	film(rt, dir, 10);
+	shot(rt, dir, "dial-spin.png");
+	film(rt, dir, 21);
+	shot(rt, dir, "dial-opencode.png");
+	step_by(1);
+	film(rt, dir, 28);
+	step_by(1);
+	film(rt, dir, 28);
+	go_to(LASTP[2]);
+	film(rt, dir, 28);
+	go_to(nth(0, 0));
+	film(rt, dir, 28);
+	go_to(cc);
+	film(rt, dir, 28);
+	DARK = false;
+	shot(rt, dir, "dial-ivory.png");
+	DARK = true;
+	gfx::close();
+}
+fn main() {
+	HOME.clear();
+	env("HOME", HOME);
+	var custom byte[>..] = [];
+	ROOT.clear();
+	if env("AMNI_DIAL_HOME", custom) && custom.len > 0 {
+		ROOT.append(custom);
+	} else {
+		ROOT.append(HOME);
+		ROOT.append("/.amni-dial");
+	}
+	check_available();
+	scan();
+	sdf_system_font();
+	build_logo();
+	font_metrics();
+	var argv byte[..4096][>..] = [];
+	let given = args();
+	for a in given {
+		var item byte[..4096] = [];
+		set_text(item, a);
+		argv.push(item);
+	}
+	var ask = -1;
+	var shots_dir byte[>..] = [];
+	var k = 0;
+	while k < argv.len {
+		if argv[k] == "--send" && k + 2 < argv.len {
+			let v, ok = parse_int(argv[k + 1]);
+			ask = clamp(v - 1, 0, 3);
+			INPUT.clear();
+			INPUT.append(argv[k + 2]);
+			k += 2;
+		} else if argv[k] == "--dark" {
+			DARK = true;
+		} else if argv[k] == "--ivory" {
+			DARK = false;
+		} else if argv[k] == "--frames" {
+			FRAMES = true;
+		} else if argv[k] == "--seed" && k + 1 < argv.len {
+			seed(argv[k + 1]);
+			k += 1;
+		} else if argv[k] == "--shots" && k + 1 < argv.len {
+			shots_dir.clear();
+			shots_dir.append(argv[k + 1]);
+			k += 1;
+		}
+		k += 1;
+	}
+	refresh_all();
+	CUR = nth(1, 0);
+	go_to(CUR);
+	ROT = ROT1;
+	if ask >= 0 {
+		go_to(LASTP[ask]);
+		send();
+		for round_no in 480 {
+			if !S[CUR].busy { break; }
+			sleep_ms(500);
+			refresh(CUR);
+		}
+		for n in S[CUR].count {
+			let l = line(CUR, n);
+			if l.len > 0 { print(l[1..l.len]); }
+		}
+	}
+	if shots_dir.len > 0 {
+		shots(shots_dir);
+	} else if ask < 0 {
+		interactive();
+	}
+}

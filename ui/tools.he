@@ -1,0 +1,259 @@
+use web
+use json
+use core
+use md
+namespace tools
+T_SESSION i32 := 701
+T_TIMER i32 := 702
+T_TASKS i32 := 703
+T_TERM i32 := 704
+T_CHANGES i32 := 705
+T_DOCTOR i32 := 706
+T_CFG i32 := 707
+T_KEY i32 := 708
+cur byte[>..] ~= []
+cur_b byte[>..] ~= []
+split_on ~= false
+code_on ~= false
+script_open ~= false
+str_of_task(d json::Doc&, n int, key const byte[:]) const byte[:]:
+	m := json::member(d, n, key)
+	s, ok := json::as_string(d, m)
+	if ok: return s
+	return ""
+set_pages(which const byte[:], on_name const byte[:]):
+	root i32 := web::el("tool-cell-a")
+	if root == 0: root = web::el("tool-panel")
+	cnt i32 := web::query_all(root, ".tool-page")
+	for i cnt:
+		p i32 := web::list_at(i as i32)
+		name byte[>..] ~= []
+		web::get_attr(p, "data-page", name)
+		if which == "a": web::cls(p, "on", name == on_name)
+		if which == "b": web::cls(p, "on-b", name == on_name)
+	bar i32 := if which == "b" { web::el("tool-tab-bar-b") } else { web::el("tool-tab-bar") }
+	n i32 := web::query_all(bar, ".tool-tab")
+	for i n:
+		b i32 := web::list_at(i as i32)
+		a byte[>..] ~= []
+		web::get_attr(b, "data-arg", a)
+		web::cls(b, "on", a == on_name);
+show_tab(name const byte[:]):
+	if name == "editor":
+		if !split_on: toggle_split()
+		cur.clear()
+		cur.append("files")
+		set_pages("a", "files")
+		show_tab_b("editor")
+		return
+	cur.clear()
+	cur.append(name)
+	set_pages("a", name)
+	if name == "tasks":
+		web::fetch("/api/tasks", T_TASKS)
+		web::fetch("/api/doctor", T_DOCTOR)
+	if name == "changes": web::fetch("/api/changes", T_CHANGES);
+show_tab_b(name const byte[:]):
+	cur_b.clear()
+	cur_b.append(name)
+	set_pages("b", name);
+toggle_split():
+	split_on = !split_on
+	web::cls(web::el("tool-panel"), "split", split_on)
+	if split_on:
+		if cur_b.len == 0:
+			if cur == "files": show_tab_b("changes")
+			else: show_tab_b("files")
+		else: set_pages("b", cur_b)
+	else:
+		root i32 := web::el("tool-cell-a")
+		cnt i32 := web::query_all(root, ".tool-page")
+		for i cnt:
+			p i32 := web::list_at(i as i32)
+			web::cls(p, "on-b", false);
+pop_out():
+	url byte[>..] ~= []
+	url.append("/?panel=")
+	if cur.len > 0: url.append(cur)
+	else: url.append("files")
+	web::open(url);
+apply_session(d json::Doc&, root int):
+	fill := json::member(d, root, "context_fill_css")
+	fs, fok := json::as_string(d, fill)
+	if fok: web::style(web::ROOT, "--ctx-fill", fs)
+	cl := json::member(d, root, "context_label")
+	cs, cok := json::as_string(d, cl)
+	if cok && web::el("sb-ctx") != 0: web::text(web::el("sb-ctx"), cs)
+	al := json::member(d, root, "atex_label")
+	atex_s, aok := json::as_string(d, al)
+	if aok && web::el("sb-atex") != 0: web::text(web::el("sb-atex"), atex_s)
+	cm := json::member(d, root, "code_mode")
+	on, bok := json::as_bool(d, cm)
+	if bok:
+		code_on = on
+		web::cls(web::el("code-mode-btn"), "on", on)
+	sc := json::member(d, root, "script")
+	if sc >= 0 && !json::is_null(d, sc):
+		web::cls(web::el("code-script"), "open", true)
+		body byte[>..] ~= []
+		json::format_node(body, d, sc)
+		web::text(web::el("code-script-body"), body);
+on_session():
+	buf byte[>..] ~= []
+	web::fetch_take(web::ev_id(), buf)
+	web::fetch_free(web::ev_id())
+	d json::Doc ~= default<json::Doc>()
+	root, err := json::parse(buf, d)
+	if root < 0: return
+	apply_session(d, root);
+on_tasks():
+	buf byte[>..] ~= []
+	web::fetch_take(web::ev_id(), buf)
+	web::fetch_free(web::ev_id())
+	d json::Doc ~= default<json::Doc>()
+	root, err := json::parse(buf, d)
+	list i32 := web::el("tasks-list")
+	if list == 0: return
+	if root < 0:
+		web::html(list, "Could not load tasks.")
+		return
+	arr := json::member(d, root, "tasks")
+	h byte[>..] ~= []
+	n := if arr >= 0 { json::count(d, arr) } else { 0 }
+	if n == 0:
+		h.append("No tasks yet.")
+	else:
+		for i n:
+			e := json::element(d, arr, i)
+			id := str_of_task(d, e, "id")
+			title := str_of_task(d, e, "title")
+			status := str_of_task(d, e, "status")
+			detail := str_of_task(d, e, "detail")
+			h.append("<div class='task-row'><div><strong>")
+			md::esc_html(h, title)
+			h.append("</strong> <span class='task-status'>")
+			md::esc_html(h, status)
+			h.append("</span><div class='task-detail'>")
+			md::esc_html(h, detail)
+			h.append("</div></div>")
+			if status != "done" && status != "stopped" && status != "ok" && id.len > 0:
+				h.append("<button data-act='tools.stop' data-arg='")
+				md::esc_html(h, id)
+				h.append("'>Stop</button>")
+			h.append("</div>")
+	web::html(list, h);
+on_doctor():
+	buf byte[>..] ~= []
+	web::fetch_take(web::ev_id(), buf)
+	web::fetch_free(web::ev_id())
+	d json::Doc ~= default<json::Doc>()
+	root, err := json::parse(buf, d)
+	box i32 := web::el("doctor-box")
+	if box == 0 || root < 0: return
+	h byte[>..] ~= []
+	h.append("<pre>")
+	json::format_node(h, d, root)
+	h.append("</pre>")
+	web::html(box, h);
+on_term():
+	buf byte[>..] ~= []
+	web::fetch_take(web::ev_id(), buf)
+	web::fetch_free(web::ev_id())
+	d json::Doc ~= default<json::Doc>()
+	root, err := json::parse(buf, d)
+	if root < 0: return
+	lg := json::member(d, root, "log")
+	s, ok := json::as_string(d, lg)
+	if ok: web::text(web::el("term-log"), s);
+on_changes():
+	buf byte[>..] ~= []
+	web::fetch_take(web::ev_id(), buf)
+	web::fetch_free(web::ev_id())
+	d json::Doc ~= default<json::Doc>()
+	root, err := json::parse(buf, d)
+	if root < 0: return
+	body i32 := web::el("diff-body")
+	if body == 0: return
+	cur_html byte[>..] ~= []
+	web::get_prop(body, "innerHTML", cur_html)
+	if cur_html.len > 0: return
+	h byte[>..] ~= []
+	h.append("<pre>")
+	st := json::member(d, root, "status")
+	st_s, st_ok := json::as_string(d, st)
+	md::esc_html(h, st_s)
+	h.append("\n")
+	ds := json::member(d, root, "diff_stat")
+	dt, dt_ok := json::as_string(d, ds)
+	md::esc_html(h, dt)
+	h.append("</pre>")
+	web::html(body, h);
+term_send():
+	cmd byte[>..] ~= []
+	web::get_prop(web::el("term-input"), "value", cmd)
+	if cmd.len == 0: return
+	body byte[>..] ~= []
+	body.append("{\"cmd\":")
+	json::format_string(body, cmd)
+	body.append("}")
+	web::request("/api/term", "POST", "{\"Content-Type\":\"application/json\"}", body, T_TERM, 0.0)
+	web::prop(web::el("term-input"), "value", "");
+toggle_code():
+	code_on = !code_on
+	body byte[>..] ~= []
+	body.append("{\"code_mode\":")
+	if code_on: body.append("true")
+	else: body.append("false")
+	body.append("}")
+	web::request("/api/config", "POST", "{\"Content-Type\":\"application/json\"}", body, T_CFG, 0.0)
+	web::cls(web::el("code-mode-btn"), "on", code_on)
+	if code_on: core::toast("Code Mode on")
+	else: core::toast("Code Mode off");
+stop_task(id const byte[:]):
+	body byte[>..] ~= []
+	body.append("{\"id\":")
+	json::format_string(body, id)
+	body.append("}")
+	web::request("/api/tasks/stop", "POST", "{\"Content-Type\":\"application/json\"}", body, T_TASKS, 0.0);
+on_key():
+	key byte[>..] ~= []
+	web::ev_key(key)
+	if key == "Enter": term_send();
+boot_panel():
+	p byte[>..] ~= []
+	if web::get_attr(web::BODY, "data-panel", p) && p.len > 0:
+		web::cls(web::BODY, "panel-only", true)
+		show_tab(p)
+	else:
+		if cur.len == 0: show_tab("files");
+init():
+	boot_panel()
+	web::fetch("/api/session", T_SESSION)
+	web::timer(7000.0, T_TIMER)
+	inp i32 := web::el("term-input")
+	if inp != 0: web::listen(inp, "keydown", T_KEY, 0);
+event(tag i32, kind i32):
+	if tag == T_TIMER:
+		web::fetch("/api/session", T_SESSION)
+		web::timer(7000.0, T_TIMER)
+	if tag == T_SESSION && kind == web::EV_FETCH: on_session()
+	if tag == T_TASKS && kind == web::EV_FETCH: on_tasks()
+	if tag == T_TERM && kind == web::EV_FETCH: on_term()
+	if tag == T_CHANGES && kind == web::EV_FETCH: on_changes()
+	if tag == T_DOCTOR && kind == web::EV_FETCH: on_doctor();
+act(verb const byte[:], arg const byte[:]):
+	if verb == "tab": show_tab(arg)
+	if verb == "tab_b": show_tab_b(arg)
+	if verb == "split": toggle_split()
+	if verb == "pop": pop_out()
+	if verb == "term_send": term_send()
+	if verb == "code_mode": toggle_code()
+	if verb == "stop": stop_task(arg)
+	if verb == "doctor":
+		show_tab("tasks")
+		web::fetch("/api/doctor", T_DOCTOR)
+	if verb == "ship":
+		core::toast("Type /ship in chat to review, fix, commit and watch the PR")
+	if verb == "script":
+		script_open = !script_open
+		web::cls(web::el("code-script"), "expanded", script_open);

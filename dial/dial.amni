@@ -5,11 +5,14 @@ import json;
 import gfx.codec_png;
 import gfx.sdf_font;
 struct Sess { plat int, n int, dir byte[>..], sid byte[>..], lines byte[>..][>..], size int, shown int, busy bool, demo bool }
-var WRAP = 47;
+var WRAPU f32 = 40.0;
+var YS f32 = 1.0;
+var BX f32 = 0.0;
+var BY f32 = 0.0;
+var WG f32 = 0.0;
 var S0 f32 = 28.0;
 let SPIN real = 0.7;
 let RAD f32 = 0.017453292;
-let LNQ f32 = -0.0834;
 let ENVP = "PATH=\"$HOME/.local/bin:$HOME/.opencode/bin:$HOME/.agy/bin:$HOME/.grok/bin:$PATH\"; ";
 var S Sess[>..] = [];
 var AV bool[4];
@@ -32,7 +35,6 @@ var H = 900;
 var CX f32 = 700.0;
 var CY f32 = 450.0;
 var R f32 = 400.0;
-var ADV f32 = 0.6;
 var LOGO TextVtx[>..] = [];
 fn pick(p int, a const byte[:], b const byte[:], c const byte[:], d const byte[:]) const byte[:] { if p == 0 { a } else if p == 1 { b } else if p == 2 { c } else { d } }
 fn pname(p int) const byte[:] { pick(p, "Grok Bot", "Claude Code", "Antigravity", "OpenCode") }
@@ -74,7 +76,7 @@ fn nth(p int, r int) int { var k = -1; var c = 0; for i in S.len { if S[i].plat 
 fn wspan() f32 { 360.0 / S.len as f32 }
 fn order(i int) int { var k = rank(i); for s in S { if s.plat < S[i].plat { k += 1; } } k }
 fn wcenter(i int) f32 { (order(i) as f32 + 0.5) * wspan() }
-fn ang(t f32) f32 { (t + ROT - 90.0) * RAD }
+fn ang(t f32) f32 { (t + ROT + 90.0) * RAD }
 fn wrapd(d f32) f32 { var x = d; while x > 180.0 { x -= 360.0; } while x < -180.0 { x += 360.0; } x }
 fn goto(i int) {
 	let d = wrapd(-wcenter(i) - ROT1);
@@ -89,14 +91,16 @@ fn goto(i int) {
 fn step(dir int) { let p = S[CUR].plat; let m = cnt(p); goto(nth(p, (rank(CUR) + dir + m) % m)); }
 fn vis(i int) int { if i == CUR { max(0, S[i].lines.len - HIDE) } else { S[i].lines.len } }
 fn sv(d json::Doc&, n int, k const byte[:]) const byte[:] { let c = json::member(d, n, k); if json::kind(d, c) == json::K_STR { json::text_of(d, c) } else { "" } }
-fn uni(c int) const byte[:] { if c == 0x2013 || c == 0x2014 || c == 0x2212 || c == 0x2022 || c == 0x25CF || c == 0xB7 { "-" } else if c == 0x2018 || c == 0x2019 || c == 0x2032 { "'" } else if c == 0x201C || c == 0x201D { "\"" } else if c == 0x2026 { "..." } else if c == 0x2192 || c == 0x21D2 || c == 0x27F6 { "->" } else if c == 0x2190 || c == 0x21D0 { "<-" } else if c == 0x2191 { "^" } else if c == 0x2193 { "v" } else if c == 0xD7 || c == 0x2717 || c == 0x274C { "x" } else if c == 0x2264 { "<=" } else if c == 0x2265 { ">=" } else if c == 0x2260 { "!=" } else if c == 0x2713 || c == 0x2714 || c == 0x2705 { "+" } else if c == 0xA0 || c >= 0x1F000 || c >= 0xFE00 && c <= 0xFE0F || c == 0x200D { " " } else if c == 0xB0 { "o" } else { "~" } }
 fn emit(out byte[>..][>..]&, t const byte[:]) {
 	var cur byte[>..] = [];
+	var cw f32 = 0.0;
 	var i = 0;
 	while i <= t.len {
 		let c = if i < t.len { t[i] } else { '\n' };
-		i += 1;
-		if c >= 128 && c < 192 || c == '\r' || c == '`' { continue; }
+		let n = if c >= 240 { 4 } else if c >= 224 { 3 } else if c >= 192 { 2 } else { 1 };
+		let ch = t[min(i, t.len)..min(i + n, t.len)];
+		i += n;
+		if c == '\r' || c == '`' || n == 4 || c >= 128 && c < 192 { continue; }
 		if c == '*' {
 			let nx = if i < t.len { t[i] } else { ' ' };
 			let pv = if cur.len > 0 { cur[cur.len - 1] } else { ' ' };
@@ -106,21 +110,18 @@ fn emit(out byte[>..][>..]&, t const byte[:]) {
 		if c == '\n' {
 			if cur.len > 0 || out.len > 0 && out[out.len - 1].len > 0 { out.push(copy(cur)); }
 			cur = [];
+			cw = 0.0;
 			continue;
 		}
-		if c >= 192 {
-			let n = if c >= 240 { 3 } else if c >= 224 { 2 } else { 1 };
-			var cp = (c as int) & (if n == 3 { 7 } else if n == 2 { 15 } else { 31 });
-			for k in n { if i < t.len { cp = cp * 64 + ((t[i] as int) & 63); i += 1; } }
-			let m = uni(cp);
-			if m != " " || cur.len > 0 && cur[cur.len - 1] != ' ' { cur.append(m); }
-		} else { cur.push(if c == '\t' { ' ' } else if c == '*' { '-' } else { c }); }
-		if cur.len >= WRAP {
+		if c == '\t' || c == '*' { cur.push(if c == '*' { '-' } else { ' ' }); } else { cur.append(ch); }
+		cw += sdf_text_w(if c == '\t' { " " } else { ch }, 1.0);
+		if cw > WRAPU {
 			var sp = cur.len - 1;
 			while sp > 0 && cur[sp] != ' ' { sp -= 1; }
-			let cut = if sp > WRAP / 2 { sp } else { cur.len };
+			let cut = if sp > cur.len / 3 { sp } else { cur.len };
 			out.push(own(cur[..cut]));
 			cur = own(cur[min(cut + 1, cur.len)..]);
+			cw = sdf_text_w(cur[..], 1.0);
 		}
 	}
 }
@@ -216,7 +217,7 @@ fn seed(path const byte[:]) {
 	S[i].demo = true;
 	S[i].size = -1;
 }
-fn pt(r f32, a f32) float2 { float2 { CX + r * cos(a), CY + r * sin(a) } }
+fn pt(r f32, a f32) float2 { float2 { CX + r * cos(a), CY + r * sin(a) * YS } }
 fn quad(vs TextVtx[>..]&, p0 float2, p1 float2, p2 float2, p3 float2, c byte[4]) {
 	let n = float2 { -1.0, -1.0 };
 	vs.append([TextVtx { pos: p0, uv: n, col: c }, TextVtx { pos: p1, uv: n, col: c }, TextVtx { pos: p2, uv: n, col: c }, TextVtx { pos: p0, uv: n, col: c }, TextVtx { pos: p2, uv: n, col: c }, TextVtx { pos: p3, uv: n, col: c }]);
@@ -243,16 +244,21 @@ fn arctext(vs TextVtx[>..]&, t const byte[:], r f32, a f32, size f32, c byte[4],
 	let fl = center && sin(a) > 0.25;
 	let hw = sdf_text_w(t, size) * 0.5 / r;
 	let a0 = if fl { a + hw } else if center { a - hw } else { a };
-	let sh = th(5, c[3] as f32 / 255.0 * (if DARK { 0.7 } else { 0.35 }));
+	let sh = th(5, c[3] as f32 / 255.0 * (if DARK { 0.45 } else { 0.12 }));
 	var i = from;
 	while i < vs.len {
 		let p = vs[i].pos;
-		vs[i].pos = if fl { pt(r - size * tilt + p.y * tilt, a0 - p.x / r) } else { pt(r - p.y * tilt, a0 + p.x / r) };
+		let q = if fl { pt(r - size * tilt + p.y * tilt, a0 - p.x / r) } else { pt(r - p.y * tilt, a0 + p.x / r) };
+		let dx = q.x - BX;
+		let dy = q.y - BY;
+		let sw = WG * WG * 1.5 * (1.0 + 45.0 / (sqrt(dx * dx + dy * dy) + 30.0));
+		let pl = 1.0 - pow(WG, 1.1) * 0.97;
+		vs[i].pos = if WG > 0.0 { float2 { BX + (dx * cos(sw) - dy * sin(sw)) * pl, BY + (dx * sin(sw) + dy * cos(sw)) * pl * (1.0 - WG * 0.5) } } else { q };
 		if vs[i].col[0] == 0 && vs[i].col[1] == 0 && vs[i].col[2] == 0 { vs[i].col = sh; }
 		i += 1;
 	}
 }
-fn flat(vs TextVtx[>..]&, x f32, y f32, size f32, t const byte[:], c byte[4], weight int) { let from = vs.len; sdf_text(vs, x, y, size, t, c, weight, false); var i = from; while i < vs.len { if vs[i].col[0] == 0 && vs[i].col[1] == 0 && vs[i].col[2] == 0 { vs[i].col = th(5, c[3] as f32 / 255.0 * 0.3); } i += 1; } }
+fn flat(vs TextVtx[>..]&, x f32, y f32, size f32, t const byte[:], c byte[4], weight int) { let from = vs.len; sdf_text(vs, x, y, size, t, c, weight, false); var i = from; while i < vs.len { if vs[i].col[0] == 0 && vs[i].col[1] == 0 && vs[i].col[2] == 0 { vs[i].col = th(5, c[3] as f32 / 255.0 * (if DARK { 0.45 } else { 0.12 })); } i += 1; } }
 fn rect(vs TextVtx[>..]&, x f32, y f32, w f32, h f32, c byte[4]) { sdf_rect(vs, x, y, w, h, c); }
 fn logo() {
 	var px byte[>..] = [];
@@ -287,97 +293,158 @@ fn status(i int) byte[>..] {
 }
 fn geom() {
 	let a = wspan() * 0.5 * RAD;
-	S0 = clamp(H as f32 * 0.034, 15.0, 34.0);
-	R = H as f32 * 1.02 + W as f32 * 0.5 / sin(a);
+	S0 = clamp(H as f32 * 0.024, 13.0, 26.0);
+	R = H as f32 * 1.3 + W as f32 * 0.5 / sin(a);
 	CX = W as f32 * 0.5;
-	CY = R + H as f32 * 0.075;
-	let w = clamp((W as f32 * 0.7 / (S0 * ADV)) as int, 24, 140);
-	if w != WRAP { WRAP = w; for i in S.len { S[i].size = -1; refresh(i); } }
+	CY = H as f32 * 0.935 - R;
+	let w = W as f32 * 0.8 / S0;
+	if abs(w - WRAPU) > 0.5 { WRAPU = w; for i in S.len { S[i].size = -1; refresh(i); } }
 }
-fn sz(r f32) f32 { S0 * exp(-(R - r) / (H as f32 * 0.8)) }
+fn sz(r f32) f32 { S0 * exp(-(R - r) / (H as f32 * 1.7)) }
+fn hole(vs TextVtx[>..]&, x f32, y f32, a f32) {
+	let rh = H as f32 * 0.042;
+	let t = NOW as f32;
+	let gold = if DARK { float3 { 1.0, 0.78, 0.38 } } else { float3 { 0.86, 0.58, 0.16 } };
+	let hot = float3 { 1.0, 0.93, 0.78 };
+	let ox = CX;
+	let oy = CY;
+	CX = x;
+	CY = y;
+	for k in 14 { disc(vs, x, y, rh * (5.4 - k as f32 * 0.3), rgba(if DARK { gold } else { float3 { 0.55, 0.40, 0.14 } }, a * 0.03)); }
+	for hb in 2 {
+		YS = 0.26;
+		let n = 72;
+		for k in n {
+			let u0 = 3.1416 * (hb as f32 + k as f32 / n as f32);
+			let u1 = 3.1416 * (hb as f32 + (k + 1) as f32 / n as f32);
+			let dop = 0.55 + 0.45 * cos(u0);
+			let sweep = 0.75 + 0.25 * sin(u0 * 3.0 - t * 2.3);
+			for ring in 3 { band(vs, rh * (1.35 + ring as f32 * 0.62), rh * (1.97 + ring as f32 * 0.62), u0, u1, rgba(if ring == 0 { hot } else { gold }, a * dop * sweep * (0.85 - ring as f32 * 0.24))); }
+		}
+		YS = 1.0;
+		if hb == 0 {
+			let sh = 1.0 + 0.04 * sin(t * 3.1);
+			band(vs, rh * 1.02 * sh, rh * 1.22 * sh, 3.1416, 6.2832, rgba(hot, a * 0.85));
+			band(vs, rh * 1.22 * sh, rh * 1.5 * sh, 3.1416, 6.2832, rgba(gold, a * 0.35));
+			band(vs, rh * 1.0, rh * 1.09, 0.0, 6.2832, rgba(hot, a * 0.9));
+			disc(vs, x, y, rh, rgba(float3 { 0.0, 0.0, 0.0 }, a));
+		}
+	}
+	CX = ox;
+	CY = oy;
+}
 fn crawl(vs TextVtx[>..]&, i int, c f32, a f32) {
 	let hh = H as f32;
-	let r0 = R - S0 * 1.25;
+	let r0 = R - S0 * 1.6;
 	let n = vis(i);
-	var rr = r0 - S0 * 2.0 + SCROLL * S0 * 1.7 * (if i == CUR { 1.0 } else { 0.0 });
+	let me = if i == CUR { 1 } else { 0 };
+	let deep = R - hh * 0.84;
+	let bh = pt(deep, c);
+	BX = bh.x;
+	BY = bh.y;
+	var rr = r0 - S0 * 1.9 + SCROLL * S0 * 1.4 * me as f32;
 	var k = 0;
-	while k < 90 && n - 1 - VIEW * (if i == CUR { 1 } else { 0 }) - k >= 0 {
-		let f = (R - rr) / (hh * 0.92);
+	while k < 200 && n - 1 - VIEW * me - k >= 0 {
+		let f = (R - rr) / (hh * 0.84);
 		if f > 1.0 { break; }
 		let size = sz(rr);
-		let fade = a * (1.0 - clamp((f - 0.45) / 0.55, 0.0, 1.0)) * clamp((r0 - S0 * 0.9 - rr) / S0, 0.0, 1.0);
-		let l = S[i].lines[n - 1 - VIEW * (if i == CUR { 1 } else { 0 }) - k][..];
+		WG = clamp((f - 0.62) / 0.38, 0.0, 1.0);
+		let fade = a * (1.0 - WG * WG * WG) * clamp((r0 - S0 * 0.9 - rr) / S0, 0.0, 1.0);
+		let l = S[i].lines[n - 1 - VIEW * me - k][..];
 		let kind = if l.len > 1 && l[0] == '>' && l[1] == ' ' { 1 } else if l.len > 1 && l[0] == '~' && l[1] == ' ' { 2 } else if l.len > 1 && l[0] == '!' && l[1] == ' ' { 3 } else { 0 };
-		let col = if kind == 1 { th(2, fade) } else if kind == 2 { th(2, 0.6 * fade) } else if kind == 3 { rgba(float3 { 0.75, 0.22, 0.18 }, fade) } else { th(1, fade) };
-		if fade > 0.01 { arctext(vs, l, rr, c, size, col, if kind == 1 { 1 } else { 0 }, 0.6 + 0.4 * (1.0 - f), true); }
-		rr -= size * 1.7;
+		let col = if kind == 1 { th(2, fade) } else if kind == 2 { th(2, 0.6 * fade) } else if kind == 3 { rgba(float3 { 0.85, 0.3, 0.22 }, fade) } else { th(1, fade) };
+		if fade > 0.01 { arctext(vs, l, rr, c, size, col, if kind == 1 { 1 } else { 0 }, 0.75 + 0.25 * (1.0 - f), true); }
+		rr -= size * 1.36;
 		k += 1;
 	}
+	WG = 0.0;
+	hole(vs, BX, BY, a);
 	let blink = if (TICK / 20) % 2 == 0 { "_" } else { " " };
 	let live = AV[S[i].plat] && !S[i].demo;
-	let prompt = if live && i == CUR { str("> ", INPUT[max(0, INPUT.len - WRAP + 4)..], blink) } else if live { str("> ") } else { status(i) };
+	let prompt = if live && i == CUR { str("> ", INPUT[..], blink) } else if live { str("> ") } else { status(i) };
 	arctext(vs, prompt[..], r0, c, S0 * 1.05, th(2, a), 1, 1.0, true);
 }
+fn rimfx(vs TextVtx[>..]&, c f32, hw f32, q int, on bool) {
+	let bw = H as f32 * 0.05;
+	let gold = if DARK { float3 { 1.0, 0.8, 0.42 } } else { float3 { 0.8, 0.6, 0.2 } };
+	for k in 12 { band(vs, R - (k + 1) as f32 * 3.0, R - k as f32 * 3.0, c - hw, c + hw, rgba(gold, 0.2 * (1.0 - k as f32 / 12.0) * (1.0 - k as f32 / 12.0))); }
+	for k in 7 { band(vs, R + bw + k as f32 * 3.0, R + bw + (k + 1) as f32 * 3.0, c - hw, c + hw, rgba(if DARK { gold } else { float3 { 0.3, 0.22, 0.1 } }, (if DARK { 0.12 } else { 0.07 }) * (1.0 - k as f32 / 7.0))); }
+	band(vs, R, R + bw, c - hw, c + hw, pc(q, if DARK { 0.42 } else { 0.55 }));
+	band(vs, R, R + bw * 0.45, c - hw, c + hw, rgba(float3 { 1.0, 1.0, 1.0 }, if DARK { 0.08 } else { 0.22 }));
+	band(vs, R + bw * 0.45, R + bw * 0.5, c - hw, c + hw, rgba(float3 { 1.0, 1.0, 1.0 }, 0.12));
+	band(vs, R - 1.0, R + 1.0, c - hw, c + hw, rgba(gold, 1.0));
+	band(vs, R + bw - 1.0, R + bw + 1.0, c - hw, c + hw, rgba(gold, 0.8));
+	let t = NOW as f32;
+	let sc = c - hw + (t * 0.18 - floor(t * 0.18)) * 2.0 * hw;
+	for k in 15 {
+		let d = (k as f32 - 7.0) / 7.0;
+		let a0 = sc + d * 0.035;
+		band(vs, R - 2.0, R + bw, a0, a0 + 0.0048, rgba(float3 { 1.0, 0.97, 0.88 }, 0.3 * (1.0 - d * d)));
+	}
+	let tk = 0.0087;
+	var a = c - hw - (c - hw) % tk;
+	while a < c + hw {
+		let big = abs(a / tk - floor(a / tk / 5.0) * 5.0) < 0.5;
+		spoke(vs, a, R - (if big { 14.0 } else { 7.0 }), R - 2.0, 1.0, rgba(gold, if big { 0.55 } else { 0.3 }));
+		a += tk;
+	}
+	arctext(vs, str(pname(q), "  ·  ", rank_of(q, on), " / ", cnt(q))[..], R + bw * 0.5 + S0 * 0.34, c, S0 * 0.68, rgba(float3 { 1.0, 0.99, 0.95 }, 1.0), 1, 1.0, true);
+}
+fn rank_of(q int, on bool) int { if on || S[CUR].plat == q { rank(CUR) + 1 } else { 1 } }
 fn draw(t gfx::Texture) {
 	let bg = th(0, 1.0);
 	guard gfx::begin_pass(t, gfx::Texture { 0 }, float4 { bg[0] as f32 / 255.0, bg[1] as f32 / 255.0, bg[2] as f32 / 255.0, 1.0 }) else { return; }
 	gfx::end_pass();
 	geom();
 	let hw = wspan() * 0.5 * RAD;
-	let rb = R - H as f32 * 1.1;
-	let rim = R + H as f32 * 0.052;
-	let top = -1.5708;
+	let rb = R - H as f32 * 1.3;
+	let front = 1.5708;
 	let spinning = abs(ROT - ROT1) > 0.01;
 	var vs TextVtx[>..] = [];
+	if DARK { for k in 140 { let h1 = ((k * 7919 + 13) % 1009) as f32 / 1009.0; let h2 = ((k * 104729 + 71) % 997) as f32 / 997.0; disc(vs, h1 * W as f32, h2 * H as f32, 0.6 + (k % 3) as f32 * 0.4, rgba(float3 { 1.0, 0.95, 0.85 }, 0.25 + 0.25 * sin(NOW as f32 * (0.7 + h1) + k as f32))); } }
 	for i in S.len {
 		let c = ang(wcenter(i));
-		let d = abs(wrapd((c - top) / RAD)) * RAD;
+		let d = abs(wrapd((c - front) / RAD)) * RAD;
 		if d > hw * 2.6 { continue; }
-		let q = S[i].plat;
-		band(vs, rb, R, c - hw, c + hw, if i == CUR { th(4, 1.0) } else { th(0, 1.0) });
-		band(vs, rb, R, c - hw, c + hw, pc(q, if DARK { 0.08 } else { 0.05 }));
-		band(vs, R, rim, c - hw, c + hw, pc(q, 0.92));
-		band(vs, rim, rim + 3.0, c - hw, c + hw, th(2, 1.0));
-		band(vs, R - 3.0, R, c - hw, c + hw, th(2, 0.9));
-		spoke(vs, c - hw, rb, rim + 3.0, 3.0, th(2, 0.95));
-		spoke(vs, c + hw, rb, rim + 3.0, 3.0, th(2, 0.95));
-		arctext(vs, str(pname(q), "   ", rank(i) + 1, " / ", cnt(q))[..], rim - (rim - R - S0 * 0.62) * 0.5, c, S0 * 0.62, rgba(float3 { 1.0, 0.98, 0.93 }, 1.0), 1, 1.0, true);
+		band(vs, rb, R, c - hw, c + hw, if i == CUR { th(4, if DARK { 0.55 } else { 1.0 }) } else { th(0, 1.0) });
+		band(vs, rb, R, c - hw, c + hw, pc(S[i].plat, if DARK { 0.05 } else { 0.035 }));
+		rimfx(vs, c, hw, S[i].plat, i == CUR);
+		for e in 2 { let ea = if e == 0 { c - hw } else { c + hw }; spoke(vs, ea, rb, R + H as f32 * 0.05, 7.0, th(2, 0.12)); spoke(vs, ea, rb, R + H as f32 * 0.05, 1.5, th(2, 0.9)); }
 		if i == CUR || spinning && d < hw * 2.0 { crawl(vs, i, c, if i == CUR { 1.0 } else { clamp(1.0 - d / (hw * 2.0), 0.0, 1.0) }); }
 	}
 	let p = S[CUR].plat;
-	let ls = 46.0;
+	let ls = 40.0;
 	let base = vs.len;
 	vs.append(LOGO[..]);
 	var i = base;
-	while i < vs.len { vs[i].pos = float2 { 22.0 + ls * 0.5 + vs[i].pos.x * ls * 0.5, H as f32 - 112.0 + ls * 0.5 + vs[i].pos.y * ls * 0.5 }; i += 1; }
-	flat(vs, 80.0, H as f32 - 104.0, 18.0, "AMNI DIAL", th(2, 1.0), 1);
-	flat(vs, 80.0, H as f32 - 80.0, 11.0, status(CUR)[..min(status(CUR).len, 34)], th(1, 0.7), 0);
+	while i < vs.len { vs[i].pos = float2 { 20.0 + ls * 0.5 + vs[i].pos.x * ls * 0.5, 18.0 + ls * 0.5 + vs[i].pos.y * ls * 0.5 }; i += 1; }
+	flat(vs, 70.0, 24.0, 15.0, "AMNI DIAL", th(2, 1.0), 1);
+	flat(vs, 70.0, 46.0, 10.0, status(CUR)[..], th(1, 0.65), 0);
+	flat(vs, 20.0, 72.0, 9.0, "← →  session    1–4  platform    +  new    Ctrl+T  theme    ↑ ↓  scroll    Enter  send", th(1, 0.45), 0);
 	for s in 2 {
-		let ax = if s == 0 { 46.0 } else { W as f32 - 46.0 };
-		let ay = H as f32 * 0.5;
+		let ax = if s == 0 { 40.0 } else { W as f32 - 40.0 };
+		let ay = H as f32 * 0.55;
 		let d = if s == 0 { -1.0 } else { 1.0 };
-		disc(vs, ax, ay, 26.0, th(2, 0.95));
-		disc(vs, ax, ay, 23.0, th(4, 1.0));
-		let e = 12.0;
+		for k in 5 { disc(vs, ax, ay, 30.0 - k as f32 * 1.5, th(2, 0.05)); }
+		disc(vs, ax, ay, 22.0, th(2, 0.9));
+		disc(vs, ax, ay, 20.5, th(4, if DARK { 0.9 } else { 1.0 }));
+		let e = 9.0;
 		let nn = float2 { -1.0, -1.0 };
 		let cc = th(2, 1.0);
 		vs.append([TextVtx { pos: float2 { ax + d * e, ay }, uv: nn, col: cc }, TextVtx { pos: float2 { ax - d * e * 0.6, ay - e }, uv: nn, col: cc }, TextVtx { pos: float2 { ax - d * e * 0.6, ay + e }, uv: nn, col: cc }]);
 	}
-	let cw = 176.0;
-	let x0 = W as f32 * 0.5 - cw * 2.0 - 15.0;
-	let y = H as f32 - 50.0;
+	let cw = 150.0;
+	let x0 = W as f32 - cw - 20.0;
 	for q in 4 {
-		let x = x0 + q as f32 * (cw + 10.0);
+		let y = 18.0 + q as f32 * 36.0;
 		let on = q == p;
-		rect(vs, x, y, cw, 30.0, if on { th(2, 1.0) } else { th(2, 0.4) });
-		rect(vs, x + 1.5, y + 1.5, cw - 3.0, 27.0, if on { th(2, 1.0) } else { th(4, 0.96) });
-		rect(vs, x + 1.5, y + 1.5, 5.0, 27.0, pc(q, 1.0));
-		flat(vs, x + 14.0, y + 9.0, 12.0, str(q + 1, " ", pname(q))[..], if on { th(0, 1.0) } else { th(1, if AV[q] { 1.0 } else { 0.45 }) }, 1);
-		flat(vs, x + cw - 20.0, y + 8.0, 13.0, "+", if on { th(0, 1.0) } else { th(2, 1.0) }, 1);
-		for k in cnt(q) { disc(vs, x + 12.0 + k as f32 * 11.0, y + 38.0, if nth(q, k) == CUR { 4.0 } else { 2.5 }, if nth(q, k) == CUR { th(2, 1.0) } else { th(2, 0.45) }); }
+		rect(vs, x0, y, cw, 28.0, if on { th(2, 1.0) } else { th(2, 0.35) });
+		rect(vs, x0 + 1.0, y + 1.0, cw - 2.0, 26.0, if on { th(2, 1.0) } else { th(4, if DARK { 0.85 } else { 0.96 }) });
+		rect(vs, x0 + 1.0, y + 1.0, 4.0, 26.0, pc(q, 1.0));
+		flat(vs, x0 + 13.0, y + 9.0, 10.0, str(q + 1, "  ", pname(q))[..], if on { th(0, 1.0) } else { th(1, if AV[q] { 1.0 } else { 0.45 }) }, 1);
+		flat(vs, x0 + cw - 18.0, y + 8.0, 11.0, "+", if on { th(0, 1.0) } else { th(2, 1.0) }, 1);
+		for k in cnt(q) { disc(vs, x0 - 10.0 - k as f32 * 9.0, y + 14.0, if nth(q, k) == CUR { 3.5 } else { 2.2 }, if nth(q, k) == CUR { th(2, 1.0) } else { th(2, 0.45) }); }
 	}
-	let hint = "<- ->  session   1-4  platform   +  new   Ctrl+T  theme   Enter  send";
-	flat(vs, W as f32 - sdf_text_w(hint, 10.0) - 18.0, H as f32 - 18.0, 10.0, hint, th(1, 0.5), 0);
 	sdf_draw(t, W, H, vs);
 }
 fn update(dt real) {
@@ -393,13 +460,12 @@ fn update(dt real) {
 }
 fn spawn(p int) { goto(make(p)); }
 fn click(m float2) {
-	for s in 2 { let ax = if s == 0 { 46.0 } else { W as f32 - 46.0 }; if abs(m.x - ax) < 30.0 && abs(m.y - H as f32 * 0.5) < 30.0 { step(if s == 0 { -1 } else { 1 }); return; } }
-	let cw = 176.0;
-	let x0 = W as f32 * 0.5 - cw * 2.0 - 15.0;
-	let y = H as f32 - 50.0;
+	for s in 2 { let ax = if s == 0 { 40.0 } else { W as f32 - 40.0 }; if abs(m.x - ax) < 26.0 && abs(m.y - H as f32 * 0.55) < 26.0 { step(if s == 0 { -1 } else { 1 }); return; } }
+	let cw = 150.0;
+	let x0 = W as f32 - cw - 20.0;
 	for q in 4 {
-		let x = x0 + q as f32 * (cw + 10.0);
-		if m.y >= y && m.y < y + 30.0 && m.x >= x && m.x < x + cw { if m.x >= x + cw - 30.0 { spawn(q); } else { goto(LASTP[q]); } return; }
+		let y = 18.0 + q as f32 * 36.0;
+		if m.y >= y && m.y < y + 28.0 && m.x >= x0 && m.x < x0 + cw { if m.x >= x0 + cw - 26.0 { spawn(q); } else { goto(LASTP[q]); } return; }
 	}
 }
 fn interactive() {
@@ -503,7 +569,6 @@ fn main() {
 	env("HOME", home);
 	if !env("AMNI_DIAL_HOME", ROOT) || ROOT.len == 0 { ROOT = str(home[..], "/.amni-dial"); }
 	for p in 4 { AV[p] = has(pexe(p)); }
-	ADV = sdf_text_w("the quick brown fox jumps over a lazy dog 0123456789", 100.0) / 100.0 / 52.0;
 	scan();
 	logo();
 	var dir byte[>..] = [];

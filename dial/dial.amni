@@ -5,7 +5,8 @@ import json;
 import gfx.codec_png;
 import gfx.sdf_font;
 struct Sess { plat int, n int, dir byte[>..], sid byte[>..], lines byte[>..][>..], size int, shown int, busy bool, demo bool }
-let WRAP = 47;
+var WRAP = 47;
+var S0 f32 = 28.0;
 let SPIN real = 0.7;
 let RAD f32 = 0.017453292;
 let LNQ f32 = -0.0834;
@@ -70,8 +71,9 @@ fn first(p int) int { var k = -1; for i in S.len { if k < 0 && S[i].plat == p { 
 fn cnt(p int) int { var k = 0; for s in S { if s.plat == p { k += 1; } } k }
 fn rank(i int) int { var k = 0; for j in i { if S[j].plat == S[i].plat { k += 1; } } k }
 fn nth(p int, r int) int { var k = -1; var c = 0; for i in S.len { if S[i].plat == p { if c == r { k = i; } c += 1; } } k }
-fn wspan(i int) f32 { 90.0 / cnt(S[i].plat) as f32 }
-fn wcenter(i int) f32 { S[i].plat as f32 * 90.0 + (rank(i) as f32 + 0.5) * wspan(i) }
+fn wspan() f32 { 360.0 / S.len as f32 }
+fn order(i int) int { var k = rank(i); for s in S { if s.plat < S[i].plat { k += 1; } } k }
+fn wcenter(i int) f32 { (order(i) as f32 + 0.5) * wspan() }
 fn ang(t f32) f32 { (t + ROT - 90.0) * RAD }
 fn wrapd(d f32) f32 { var x = d; while x > 180.0 { x -= 360.0; } while x < -180.0 { x += 360.0; } x }
 fn goto(i int) {
@@ -87,6 +89,7 @@ fn goto(i int) {
 fn step(dir int) { let p = S[CUR].plat; let m = cnt(p); goto(nth(p, (rank(CUR) + dir + m) % m)); }
 fn vis(i int) int { if i == CUR { max(0, S[i].lines.len - HIDE) } else { S[i].lines.len } }
 fn sv(d json::Doc&, n int, k const byte[:]) const byte[:] { let c = json::member(d, n, k); if json::kind(d, c) == json::K_STR { json::text_of(d, c) } else { "" } }
+fn uni(c int) const byte[:] { if c == 0x2013 || c == 0x2014 || c == 0x2212 || c == 0x2022 || c == 0x25CF || c == 0xB7 { "-" } else if c == 0x2018 || c == 0x2019 || c == 0x2032 { "'" } else if c == 0x201C || c == 0x201D { "\"" } else if c == 0x2026 { "..." } else if c == 0x2192 || c == 0x21D2 || c == 0x27F6 { "->" } else if c == 0x2190 || c == 0x21D0 { "<-" } else if c == 0x2191 { "^" } else if c == 0x2193 { "v" } else if c == 0xD7 || c == 0x2717 || c == 0x274C { "x" } else if c == 0x2264 { "<=" } else if c == 0x2265 { ">=" } else if c == 0x2260 { "!=" } else if c == 0x2713 || c == 0x2714 || c == 0x2705 { "+" } else if c == 0xA0 || c >= 0x1F000 || c >= 0xFE00 && c <= 0xFE0F || c == 0x200D { " " } else if c == 0xB0 { "o" } else { "~" } }
 fn emit(out byte[>..][>..]&, t const byte[:]) {
 	var cur byte[>..] = [];
 	var i = 0;
@@ -94,13 +97,24 @@ fn emit(out byte[>..][>..]&, t const byte[:]) {
 		let c = if i < t.len { t[i] } else { '\n' };
 		i += 1;
 		if c >= 128 && c < 192 || c == '\r' || c == '`' { continue; }
-		if c == '*' && i < t.len && t[i] == '*' { i += 1; continue; }
+		if c == '*' {
+			let nx = if i < t.len { t[i] } else { ' ' };
+			let pv = if cur.len > 0 { cur[cur.len - 1] } else { ' ' };
+			if nx == '*' { i += 1; continue; }
+			if nx != ' ' || pv != ' ' { continue; }
+		}
 		if c == '\n' {
 			if cur.len > 0 || out.len > 0 && out[out.len - 1].len > 0 { out.push(copy(cur)); }
 			cur = [];
 			continue;
 		}
-		cur.push(if c >= 192 { '?' } else if c == '\t' { ' ' } else { c });
+		if c >= 192 {
+			let n = if c >= 240 { 3 } else if c >= 224 { 2 } else { 1 };
+			var cp = (c as int) & (if n == 3 { 7 } else if n == 2 { 15 } else { 31 });
+			for k in n { if i < t.len { cp = cp * 64 + ((t[i] as int) & 63); i += 1; } }
+			let m = uni(cp);
+			if m != " " || cur.len > 0 && cur[cur.len - 1] != ' ' { cur.append(m); }
+		} else { cur.push(if c == '\t' { ' ' } else if c == '*' { '-' } else { c }); }
 		if cur.len >= WRAP {
 			var sp = cur.len - 1;
 			while sp > 0 && cur[sp] != ' ' { sp -= 1; }
@@ -271,104 +285,99 @@ fn status(i int) byte[>..] {
 	let p = S[i].plat;
 	if S[i].demo { str("DEMO REPLAY - recorded Claude Code run") } else if !AV[p] { if p == 0 { str("no public Grok Bot API - install the grok CLI to drive this sector") } else { str(pexe(p), " not installed - adapter ready") } } else if S[i].busy { str("working", pick((TICK / 9) % 4, "", ".", "..", "...")) } else { str("live - Enter sends") }
 }
+fn geom() {
+	let a = wspan() * 0.5 * RAD;
+	S0 = clamp(H as f32 * 0.034, 15.0, 34.0);
+	R = H as f32 * 1.02 + W as f32 * 0.5 / sin(a);
+	CX = W as f32 * 0.5;
+	CY = R + H as f32 * 0.075;
+	let w = clamp((W as f32 * 0.7 / (S0 * ADV)) as int, 24, 140);
+	if w != WRAP { WRAP = w; for i in S.len { S[i].size = -1; refresh(i); } }
+}
+fn sz(r f32) f32 { S0 * exp(-(R - r) / (H as f32 * 0.8)) }
+fn crawl(vs TextVtx[>..]&, i int, c f32, a f32) {
+	let hh = H as f32;
+	let r0 = R - S0 * 1.25;
+	let n = vis(i);
+	var rr = r0 - S0 * 2.0 + SCROLL * S0 * 1.7 * (if i == CUR { 1.0 } else { 0.0 });
+	var k = 0;
+	while k < 90 && n - 1 - VIEW * (if i == CUR { 1 } else { 0 }) - k >= 0 {
+		let f = (R - rr) / (hh * 0.92);
+		if f > 1.0 { break; }
+		let size = sz(rr);
+		let fade = a * (1.0 - clamp((f - 0.45) / 0.55, 0.0, 1.0)) * clamp((r0 - S0 * 0.9 - rr) / S0, 0.0, 1.0);
+		let l = S[i].lines[n - 1 - VIEW * (if i == CUR { 1 } else { 0 }) - k][..];
+		let kind = if l.len > 1 && l[0] == '>' && l[1] == ' ' { 1 } else if l.len > 1 && l[0] == '~' && l[1] == ' ' { 2 } else if l.len > 1 && l[0] == '!' && l[1] == ' ' { 3 } else { 0 };
+		let col = if kind == 1 { th(2, fade) } else if kind == 2 { th(2, 0.6 * fade) } else if kind == 3 { rgba(float3 { 0.75, 0.22, 0.18 }, fade) } else { th(1, fade) };
+		if fade > 0.01 { arctext(vs, l, rr, c, size, col, if kind == 1 { 1 } else { 0 }, 0.6 + 0.4 * (1.0 - f), true); }
+		rr -= size * 1.7;
+		k += 1;
+	}
+	let blink = if (TICK / 20) % 2 == 0 { "_" } else { " " };
+	let live = AV[S[i].plat] && !S[i].demo;
+	let prompt = if live && i == CUR { str("> ", INPUT[max(0, INPUT.len - WRAP + 4)..], blink) } else if live { str("> ") } else { status(i) };
+	arctext(vs, prompt[..], r0, c, S0 * 1.05, th(2, a), 1, 1.0, true);
+}
 fn draw(t gfx::Texture) {
 	let bg = th(0, 1.0);
 	guard gfx::begin_pass(t, gfx::Texture { 0 }, float4 { bg[0] as f32 / 255.0, bg[1] as f32 / 255.0, bg[2] as f32 / 255.0, 1.0 }) else { return; }
 	gfx::end_pass();
-	CX = W as f32 * 0.5;
-	CY = H as f32 * 0.51;
-	R = min(W as f32 * 0.5, H as f32 * 0.5) * 0.86;
-	let hub = R * 0.2;
-	let rim = R * 1.075;
-	var vs TextVtx[>..] = [];
-	disc(vs, CX, CY, rim + R * 0.012, th(2, 0.9));
-	disc(vs, CX, CY, rim, th(4, 1.0));
+	geom();
+	let hw = wspan() * 0.5 * RAD;
+	let rb = R - H as f32 * 1.1;
+	let rim = R + H as f32 * 0.052;
 	let top = -1.5708;
-	let span = WRAP as f32 * ADV * 0.04 + 0.08;
+	let spinning = abs(ROT - ROT1) > 0.01;
+	var vs TextVtx[>..] = [];
 	for i in S.len {
 		let c = ang(wcenter(i));
-		let hw = wspan(i) * 0.5 * RAD;
-		let on = i == CUR;
-		band(vs, hub, R, c - hw, c + hw, if on { th(2, 0.16) } else { pc(S[i].plat, if rank(i) % 2 == 0 { 0.07 } else { 0.12 }) });
-		spoke(vs, c - hw, hub, R, if rank(i) == 0 { 3.0 } else { 1.0 }, if rank(i) == 0 { th(2, 0.9) } else { th(2, 0.35) });
+		let d = abs(wrapd((c - top) / RAD)) * RAD;
+		if d > hw * 2.6 { continue; }
+		let q = S[i].plat;
+		band(vs, rb, R, c - hw, c + hw, if i == CUR { th(4, 1.0) } else { th(0, 1.0) });
+		band(vs, rb, R, c - hw, c + hw, pc(q, if DARK { 0.08 } else { 0.05 }));
+		band(vs, R, rim, c - hw, c + hw, pc(q, 0.92));
+		band(vs, rim, rim + 3.0, c - hw, c + hw, th(2, 1.0));
+		band(vs, R - 3.0, R, c - hw, c + hw, th(2, 0.9));
+		spoke(vs, c - hw, rb, rim + 3.0, 3.0, th(2, 0.95));
+		spoke(vs, c + hw, rb, rim + 3.0, 3.0, th(2, 0.95));
+		arctext(vs, str(pname(q), "   ", rank(i) + 1, " / ", cnt(q))[..], rim - (rim - R - S0 * 0.62) * 0.5, c, S0 * 0.62, rgba(float3 { 1.0, 0.98, 0.93 }, 1.0), 1, 1.0, true);
+		if i == CUR || spinning && d < hw * 2.0 { crawl(vs, i, c, if i == CUR { 1.0 } else { clamp(1.0 - d / (hw * 2.0), 0.0, 1.0) }); }
 	}
-	let ca = ang(wcenter(CUR));
-	band(vs, hub * 1.05, R * 0.99, ca - span * 0.5 - 0.03, ca + span * 0.5 + 0.03, th(4, 0.82));
-	for i in S.len {
-		let c = ang(wcenter(i));
-		let wd = wspan(i) * RAD;
-		let dd = abs(wrapd((c - ca) / RAD)) * RAD;
-		if i == CUR || dd < span * 0.5 + wd * 0.3 { continue; }
-		let fade = clamp((dd - span * 0.5 - wd * 0.3) / 0.4, 0.0, 1.0);
-		arctext(vs, str(pname(S[i].plat), " #", S[i].n)[..], R * 0.95, c, R * 0.026, pc(S[i].plat, 0.9 * fade), 1, 1.0, true);
-		let n = S[i].lines.len;
-		for k in 5 {
-			let idx = n - 1 - k;
-			if idx < 0 { break; }
-			let r = R * 0.86 * exp(LNQ * 1.6 * k as f32);
-			let size = r * 0.024;
-			let maxc = max(4, (wd * 0.86 * r / (size * ADV)) as int);
-			let l = S[i].lines[idx][..];
-			arctext(vs, l[..min(l.len, maxc)], r, c, size, th(1, 0.7 * fade * (1.0 - k as f32 * 0.15)), 0, 1.0, true);
-		}
-		if n == 0 { arctext(vs, status(i)[..min(status(i).len, max(4, (wd * 0.86 * R * 0.7 / (R * 0.018 * ADV)) as int))], R * 0.7, c, R * 0.018, th(1, 0.45 * fade), 0, 1.0, true); }
-	}
-	let n = vis(CUR);
-	for k in 60 {
-		let idx = n - 1 - VIEW - k;
-		if idx < 0 { break; }
-		let pos = k as f32 + 1.0 - SCROLL;
-		let r = R * 0.9 * exp(LNQ * pos);
-		if r < hub * 1.12 { break; }
-		let fade = clamp((r - hub * 1.12) / (R * 0.3), 0.0, 1.0) * clamp((R * 0.93 - r) / (R * 0.05), 0.0, 1.0);
-		let l = S[CUR].lines[idx][..];
-		let kind = if l.len > 1 && l[0] == '>' && l[1] == ' ' { 1 } else if l.len > 1 && l[0] == '~' { 2 } else if l.len > 1 && l[0] == '!' { 3 } else { 0 };
-		let c = if kind == 1 { th(2, fade) } else if kind == 2 { th(2, 0.6 * fade) } else if kind == 3 { rgba(float3 { 0.75, 0.22, 0.18 }, fade) } else { th(1, fade) };
-		arctext(vs, l, r, ca, r * 0.04, c, if kind == 1 { 1 } else { 0 }, 0.55 + 0.45 * r / R, true);
-	}
-	let blink = if (TICK / 20) % 2 == 0 { "_" } else { " " };
 	let p = S[CUR].plat;
-	let prompt = if AV[p] && !S[CUR].demo { str("> ", INPUT[max(0, INPUT.len - WRAP + 4)..], blink) } else { status(CUR) };
-	arctext(vs, prompt[..], R * 0.975, ca, R * 0.036, th(2, 1.0), 1, 1.0, true);
-	band(vs, R * 0.995, R * 1.0, 0.0, 6.2832, th(2, 0.8));
-	for q in 4 {
-		let a0 = ang(q as f32 * 90.0);
-		let a1 = ang(q as f32 * 90.0 + 90.0);
-		band(vs, R * 1.005, rim, a0 + 0.004, a1 - 0.004, pc(q, if q == p { 0.95 } else { 0.55 }));
-		arctext(vs, str(pname(q), "  ", cnt(q))[..], rim - R * 0.02, (a0 + a1) * 0.5, R * 0.032, rgba(float3 { 1.0, 0.98, 0.93 }, 1.0), 1, 1.0, true);
-	}
-	disc(vs, CX, CY, hub * 1.06, th(2, 0.95));
-	disc(vs, CX, CY, hub, rgba(float3 { 0.995, 0.985, 0.955 }, 1.0));
+	let ls = 46.0;
 	let base = vs.len;
 	vs.append(LOGO[..]);
 	var i = base;
-	while i < vs.len { vs[i].pos = float2 { CX + vs[i].pos.x * hub * 0.9, CY + vs[i].pos.y * hub * 0.9 }; i += 1; }
+	while i < vs.len { vs[i].pos = float2 { 22.0 + ls * 0.5 + vs[i].pos.x * ls * 0.5, H as f32 - 112.0 + ls * 0.5 + vs[i].pos.y * ls * 0.5 }; i += 1; }
+	flat(vs, 80.0, H as f32 - 104.0, 18.0, "AMNI DIAL", th(2, 1.0), 1);
+	flat(vs, 80.0, H as f32 - 80.0, 11.0, status(CUR)[..min(status(CUR).len, 34)], th(1, 0.7), 0);
 	for s in 2 {
-		let ax = if s == 0 { CX - rim - R * 0.13 } else { CX + rim + R * 0.13 };
+		let ax = if s == 0 { 46.0 } else { W as f32 - 46.0 };
+		let ay = H as f32 * 0.5;
 		let d = if s == 0 { -1.0 } else { 1.0 };
-		disc(vs, ax, CY, R * 0.075, th(2, 0.95));
-		disc(vs, ax, CY, R * 0.068, th(4, 1.0));
-		let e = R * 0.035;
+		disc(vs, ax, ay, 26.0, th(2, 0.95));
+		disc(vs, ax, ay, 23.0, th(4, 1.0));
+		let e = 12.0;
 		let nn = float2 { -1.0, -1.0 };
 		let cc = th(2, 1.0);
-		vs.append([TextVtx { pos: float2 { ax + d * e, CY }, uv: nn, col: cc }, TextVtx { pos: float2 { ax - d * e * 0.6, CY - e }, uv: nn, col: cc }, TextVtx { pos: float2 { ax - d * e * 0.6, CY + e }, uv: nn, col: cc }]);
+		vs.append([TextVtx { pos: float2 { ax + d * e, ay }, uv: nn, col: cc }, TextVtx { pos: float2 { ax - d * e * 0.6, ay - e }, uv: nn, col: cc }, TextVtx { pos: float2 { ax - d * e * 0.6, ay + e }, uv: nn, col: cc }]);
 	}
-	flat(vs, 28.0, 30.0, 26.0, "AMNI DIAL", th(2, 1.0), 1);
-	flat(vs, 28.0, 70.0, 17.0, str(pname(p), " #", S[CUR].n, "  ", rank(CUR) + 1, "/", cnt(p))[..], th(1, 1.0), 1);
-	flat(vs, 28.0, 98.0, 13.0, status(CUR)[..min(status(CUR).len, 44)], th(1, 0.7), 0);
+	let cw = 176.0;
+	let x0 = W as f32 * 0.5 - cw * 2.0 - 15.0;
+	let y = H as f32 - 50.0;
 	for q in 4 {
-		let y = H as f32 - 214.0 + q as f32 * 48.0;
+		let x = x0 + q as f32 * (cw + 10.0);
 		let on = q == p;
-		rect(vs, 24.0, y, 236.0, 40.0, if on { th(2, 1.0) } else { th(2, 0.45) });
-		rect(vs, 26.0, y + 2.0, 232.0, 36.0, if on { th(2, 1.0) } else { th(4, 1.0) });
-		rect(vs, 26.0, y + 2.0, 6.0, 36.0, pc(q, 1.0));
-		let tc = if on { th(0, 1.0) } else { th(1, if AV[q] { 1.0 } else { 0.45 }) };
-		flat(vs, 42.0, y + 13.0, 15.0, str(q + 1, "  ", pname(q))[..], tc, 1);
-		rect(vs, 222.0, y + 6.0, 30.0, 28.0, if on { th(0, 0.9) } else { th(2, 0.25) });
-		flat(vs, 230.0, y + 12.0, 16.0, "+", th(2, 1.0), 1);
+		rect(vs, x, y, cw, 30.0, if on { th(2, 1.0) } else { th(2, 0.4) });
+		rect(vs, x + 1.5, y + 1.5, cw - 3.0, 27.0, if on { th(2, 1.0) } else { th(4, 0.96) });
+		rect(vs, x + 1.5, y + 1.5, 5.0, 27.0, pc(q, 1.0));
+		flat(vs, x + 14.0, y + 9.0, 12.0, str(q + 1, " ", pname(q))[..], if on { th(0, 1.0) } else { th(1, if AV[q] { 1.0 } else { 0.45 }) }, 1);
+		flat(vs, x + cw - 20.0, y + 8.0, 13.0, "+", if on { th(0, 1.0) } else { th(2, 1.0) }, 1);
+		for k in cnt(q) { disc(vs, x + 12.0 + k as f32 * 11.0, y + 38.0, if nth(q, k) == CUR { 4.0 } else { 2.5 }, if nth(q, k) == CUR { th(2, 1.0) } else { th(2, 0.45) }); }
 	}
-	let hint = "<- ->  session    1-4  platform    + / Ctrl+N  new    Ctrl+T  theme    Enter  send";
-	flat(vs, W as f32 - sdf_text_w(hint, 12.0) - 28.0, H as f32 - 34.0, 12.0, hint, th(1, 0.6), 0);
+	let hint = "<- ->  session   1-4  platform   +  new   Ctrl+T  theme   Enter  send";
+	flat(vs, W as f32 - sdf_text_w(hint, 10.0) - 18.0, H as f32 - 18.0, 10.0, hint, th(1, 0.5), 0);
 	sdf_draw(t, W, H, vs);
 }
 fn update(dt real) {
@@ -384,26 +393,24 @@ fn update(dt real) {
 }
 fn spawn(p int) { goto(make(p)); }
 fn click(m float2) {
-	let rim = R * 1.075;
-	for s in 2 { let ax = if s == 0 { CX - rim - R * 0.13 } else { CX + rim + R * 0.13 }; if abs(m.x - ax) < R * 0.08 && abs(m.y - CY) < R * 0.08 { step(if s == 0 { -1 } else { 1 }); return; } }
+	for s in 2 { let ax = if s == 0 { 46.0 } else { W as f32 - 46.0 }; if abs(m.x - ax) < 30.0 && abs(m.y - H as f32 * 0.5) < 30.0 { step(if s == 0 { -1 } else { 1 }); return; } }
+	let cw = 176.0;
+	let x0 = W as f32 * 0.5 - cw * 2.0 - 15.0;
+	let y = H as f32 - 50.0;
 	for q in 4 {
-		let y = H as f32 - 214.0 + q as f32 * 48.0;
-		if m.y >= y && m.y < y + 40.0 && m.x >= 24.0 && m.x < 260.0 { if m.x >= 218.0 { spawn(q); } else { goto(LASTP[q]); } return; }
-	}
-	let dx = m.x - CX;
-	let dy = m.y - CY;
-	let r = sqrt(dx * dx + dy * dy);
-	if r > R * 0.2 && r < rim {
-		let th0 = atan2(dy, dx) / RAD + 90.0 - ROT;
-		for i in S.len { if abs(wrapd(th0 - wcenter(i))) <= wspan(i) * 0.5 { goto(i); return; } }
+		let x = x0 + q as f32 * (cw + 10.0);
+		if m.y >= y && m.y < y + 30.0 && m.x >= x && m.x < x + cw { if m.x >= x + cw - 30.0 { spawn(q); } else { goto(LASTP[q]); } return; }
 	}
 }
 fn interactive() {
-	if !gfx::open("Amni Dial", W, H) { print("no window: ", gfx::error()); return; }
+	if !gfx::open("Amni Dial", W, H, gfx::WINDOW_RESIZABLE as int) { print("no window: ", gfx::error()); return; }
 	gfx::text_input(true);
 	var last = gfx::time();
 	while gfx::frame() {
 		NOW = gfx::time();
+		let ss = gfx::screen_size();
+		W = ss.x as int;
+		H = ss.y as int;
 		let ctrl = gfx::key_down("Left Ctrl") || gfx::key_down("Right Ctrl");
 		for ev in gfx::events() {
 			if ev.kind == 2 && !ctrl {

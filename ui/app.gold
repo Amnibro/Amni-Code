@@ -11,12 +11,13 @@ use look
 use editor
 use panes
 use picker
+use tools
 ```
 
 This is the root program of the Amni-Code page. `CLICK` is tag 1 and `CHANGE` is tag 2.
 
-`run_actions()` takes queued actions from core one by one until none remain. For each, the part of the name before the first dot picks the module and the part after it is the verb. "chat", "settings", "look", "editor", "panes" and "picker" call that module's `act` with the verb and the argument. "app" with the verb "lang" calls `core::set_lang` with the argument. Any other name is ignored.
+`run_actions()` takes queued actions from core one by one until none remain. For each, the part of the name before the first dot picks the module and the part after it is the verb. "chat", "settings", "look", "editor", "panes", "picker" and "tools" call that module's `act` with the verb and the argument. "app" with the verb "lang" calls `core::set_lang` with the argument. Any other name is ignored.
 
-`he_event(tag, kind)` is exported to the page. For `CLICK`, it finds the closest element to the event target that has a "data-act" attribute. When there is one, it reads that element's "data-act" and "data-arg" attributes, with the argument empty when "data-arg" is missing, and queues them with that element through `core::post_el`; when the element's "href" attribute is "#", it also prevents the event's default action. For `CHANGE`, it does the same with the closest element that has a "data-change" attribute, using that element's current "value" property as the argument. Tags from 10 to 99 go to `core::event`. A tag of 100 or more goes to the module owning its hundred, by calling that module's `event` with the tag and the kind: 1 chat, 2 settings, 3 look, 4 editor, 5 panes, 6 picker. After any event it runs the queued actions.
+`he_event(tag, kind)` is exported to the page. For `CLICK`, it finds the closest element to the event target that has a "data-act" attribute. When there is one, it reads that element's "data-act" and "data-arg" attributes, with the argument empty when "data-arg" is missing, and queues them with that element through `core::post_el`; when the element's "href" attribute is "#", it also prevents the event's default action. For `CHANGE`, it does the same with the closest element that has a "data-change" attribute, using that element's current "value" property as the argument. Tags from 10 to 99 go to `core::event`. A tag of 100 or more goes to the module owning its hundred, by calling that module's `event` with the tag and the kind: 1 chat, 2 settings, 3 look, 4 editor, 5 panes, 6 picker, 7 tools. After any event it runs the queued actions.
 
-`main()` calls `core::init`, then the `init` of look, settings, chat, editor, panes and picker in that order. It then listens on the web module's body for "click" with tag `CLICK` and for "change" with tag `CHANGE`, both with no flags, and finally runs the queued actions.
+`main()` calls `core::init`, then the `init` of look, settings, chat, editor, panes, picker and tools in that order. It then listens on the web module's body for "click" with tag `CLICK` and for "change" with tag `CHANGE`, both with no flags, and finally runs the queued actions.

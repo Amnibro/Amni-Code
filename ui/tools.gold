@@ -1,0 +1,12 @@
+use web
+use json
+use core
+use md
+into tools.he
+lang he
+
+The module is namespace `tools`. It owns tags 700 to 799: `T_SESSION` 701 (fetch of "/api/session"), `T_TIMER` 702 (a 7000 ms poll), `T_TASKS` 703, `T_TERM` 704, `T_CHANGES` 705, `T_DOCTOR` 706, `T_CFG` 707 and `T_KEY` 708 (Enter in the terminal input).
+
+It runs the desktop side panel: Files, Changes, Terminal, Editor and Tasks open as tabs in one panel. Tabs can be split to view two at once (`on` and `on-b` classes) or popped out with `web::open` of "/?panel=" followed by the current tab name. It applies the Amniscient context-snow backdrop by writing the CSS custom property "--ctx-fill" and the status labels "sb-ctx" and "sb-atex" from the session payload. ATEX text is whatever the server sent; this module never invents a savings number.
+
+`init()` boots the panel (honouring the body attribute "data-panel"), fetches "/api/session", starts the timer and listens for keydown on "term-input". `event` and `act` handle the tags and the verbs tab, tab_b, split, pop, term_send, code_mode, stop, doctor, ship and script.

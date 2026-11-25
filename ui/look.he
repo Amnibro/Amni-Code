@@ -9,15 +9,12 @@ T_HEALTH i32 := 304
 accent_idx ~= 0
 skin_saved() const byte[:]:
 	s byte[>..] ~= []
-	if web::store_get("amni_skin", s) && s == "amniscient": return "amniscient"
-	return "braid"
+	if web::store_get("amni_skin", s) && s == "braid": return "braid"
+	return "amniscient"
 tone_saved() const byte[:]:
 	s byte[>..] ~= []
-	if !web::store_get("amni-theme", s):
-		if web::prefers_dark(): return "dark"
-		return "light"
-	if s == "light": return "light"
-	return "dark"
+	if web::store_get("amni-theme", s) && s == "dark": return "dark"
+	return "light"
 apply_skin(skin const byte[:], tone const byte[:]):
 	braid := !(skin == "amniscient")
 	light := tone == "light"

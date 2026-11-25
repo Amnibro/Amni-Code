@@ -6,6 +6,7 @@ use look
 use editor
 use panes
 use picker
+use tools
 use web
 CLICK := 1
 CHANGE := 2
@@ -24,6 +25,7 @@ run_actions():
 		else if head == "editor": editor::act(verb, arg)
 		else if head == "panes": panes::act(verb, arg)
 		else if head == "picker": picker::act(verb, arg)
+		else if head == "tools": tools::act(verb, arg)
 		else if head == "app" && verb == "lang": core::set_lang(arg);
 queue_attr(el i32, attr_name const byte[:], use_value bool):
 	if el <= 0: return
@@ -54,6 +56,7 @@ export fn he_event(tag i32, kind i32):
 		else if owner == 4: editor::event(tag, kind)
 		else if owner == 5: panes::event(tag, kind)
 		else if owner == 6: picker::event(tag, kind)
+		else if owner == 7: tools::event(tag, kind)
 	run_actions();
 main():
 	core::init()
@@ -63,6 +66,7 @@ main():
 	editor::init()
 	panes::init()
 	picker::init()
+	tools::init()
 	web::listen(web::BODY, "click", CLICK, 0)
 	web::listen(web::BODY, "change", CHANGE, 0)
 	run_actions();

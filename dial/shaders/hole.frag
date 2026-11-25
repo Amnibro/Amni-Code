@@ -20,10 +20,10 @@ vec3 disk(float x, float ph, float t, float sp) {
 	float tur = fbm(vec2(x * 4.3, 0.0) + vec2(cos(pa), sin(pa)) * 2.2);
 	float e = smoothstep(1.3, 1.75, x) * (1.0 - smoothstep(3.4, 5.9, x)) * pow(x / 1.7, -1.5);
 	vec3 tc = mix(mix(vec3(1.0, 0.96, 0.88), vec3(1.0, 0.64, 0.24), smoothstep(1.5, 2.8, x)), vec3(0.62, 0.16, 0.05), smoothstep(2.8, 5.5, x));
-	return tc * e * (0.45 + 1.1 * tur * tur) * pow(max(1.0 - 0.45 * cos(ph) * sp, 0.2), 2.5) * 0.95;
+	return tc * e * (0.45 + 1.1 * tur * tur) * pow(1.0 - 0.15 * cos(ph) * sp, 2.0) * 0.85;
 }
 vec3 ink(vec3 c, vec3 e) { float l = clamp(dot(e, vec3(0.3, 0.5, 0.2)) * 1.3, 0.0, 0.92); return mix(c, vec3(0.60, 0.40, 0.11) * (0.55 + 0.45 * l), l); }
-vec3 put(vec3 c, vec3 e) { return a.w > 0.5 ? ink(c, e) : c + e; }
+vec3 put(vec3 c, vec3 e) { return a.w > 0.5 ? ink(c, e) : c + e * 1.2 / (1.0 + 0.4 * dot(e, vec3(0.3, 0.5, 0.2))); }
 void main() {
 	vec2 p = in_uv * a.xy; float t = a.z; float sp = m.z; float tilt = m.y; bool over = m.x > 0.5;
 	vec4 hs[2] = vec4[2](h0, h1);
@@ -36,15 +36,15 @@ void main() {
 		vec2 d = p - h.xy; float r = length(d) + 0.001; float rh = h.z; float xr = r / rh; float ang = atan(d.y, d.x);
 		vec2 dd = vec2(d.x, d.y / tilt); float rho = length(dd) / rh; float ph = atan(dd.y, dd.x);
 		float mask = smoothstep(0.985, 1.0, xr);
-		vec3 ring = vec3(1.0, 0.9, 0.72) * 2.4 * exp(-pow((xr - 1.035) / 0.03, 2.0)) * (1.0 - 0.3 * cos(ang) * sp) * h.w;
+		vec3 ring = vec3(1.0, 0.9, 0.72) * 2.4 * exp(-pow((xr - 1.035) / 0.03, 2.0)) * (1.0 - 0.1 * cos(ang) * sp) * h.w;
 		vec3 near = d.y >= 0.0 ? disk(rho, ph, t, sp) * h.w : vec3(0.0);
-		if (over) { c += (near + ring) * (a.w > 0.5 ? 0.0 : 1.0); cov = max(cov, (1.0 - mask) * h.w); continue; }
-		bool top = d.y < 0.0;
-		vec3 halo = xr > 1.0 ? disk(1.3 + (xr - 1.07) * (top ? 2.4 : 4.8), ang, t, sp) * (top ? 0.85 : 0.35) * smoothstep(1.0, 1.08, xr) * h.w : vec3(0.0);
+		if (over) { c = put(c, (near + ring) * (a.w > 0.5 ? 0.0 : 1.0)); cov = max(cov, (1.0 - mask) * h.w); continue; }
+		bool top = d.y < 0.0; float tb = smoothstep(-0.7, 0.7, d.y / rh);
+		vec3 halo = xr > 1.0 ? disk(1.3 + (xr - 1.07) * mix(2.4, 4.8, tb), ang, t, sp) * mix(0.85, 0.35, tb) * smoothstep(1.0, 1.08, xr) * h.w : vec3(0.0);
 		vec3 far = top && xr > 1.0 ? disk(rho, ph, t, sp) * h.w : vec3(0.0);
 		c = put(c, halo + far + vec3(1.0, 0.62, 0.28) * 0.10 * exp(-max(xr - 1.0, 0.0) / 2.2) * h.w);
 		c = mix(c, c * mask, h.w);
-		c = put(c, near + ring);
+		c = put(c, (near + ring) * (a.w > 0.5 ? 1.0 : 0.0));
 	}
 	if (over && a.w > 0.5) { o = vec4(0.0, 0.0, 0.0, cov); return; }
 	o = over ? vec4(c, cov) : vec4(c, 1.0);

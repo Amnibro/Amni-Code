@@ -16,9 +16,19 @@ def test_side_panel_layout():
         assert s in html, s
     assert 'tools::init' in app and 'owner == 7' in app
 def test_backend_routes_and_slash():
-    for s in ['/api/session','/api/tasks','/api/doctor','/api/term','/api/changes','amniscient-logo.png','SlashCmd::Ship','SlashCmd::Tasks','SlashCmd::Doctor','SlashCmd::CodeMode','CODE_MODE_PROMPT']:
+    for s in ['/api/session','/api/session/reset','/api/approve','/api/tasks','/api/doctor','/api/term','/api/changes','amniscient-logo.png','SlashCmd::Ship','SlashCmd::Tasks','SlashCmd::Doctor','SlashCmd::CodeMode','CODE_MODE_PROMPT','parse_early','has_upstream']:
         assert s in main, s
     raw=(ROOT/'static'/'amniscient-logo.png').read_bytes()
     assert len(raw) > 1000 and raw[:8] == b'\x89PNG\r\n\x1a\n'
+def test_friction_fixes():
+    tools=(ROOT/'ui'/'tools.he').read_text(encoding='utf-8')
+    chat=(ROOT/'ui'/'chat.he').read_text(encoding='utf-8')
+    seats=(ROOT/'src'/'cli_seats.rs').read_text(encoding='utf-8')
+    assert "class='task-row'" in tools and "tools.stop" in tools and "No tasks yet." in tools
+    assert "approve-banner" in chat and "/api/approve" in chat and "resume_from_session" in chat and "on_boot" in chat
+    assert "--permission-prompt-tool" in seats and "Feed::Jsonl" in seats and "EDIT_ALLOW" in seats and "Bash(hcn *)" in seats
+    assert '"approval"' in seats and 'StreamEv::Permit' in seats
+    assert ".approve-banner" in html
+    assert "unknown option" in main and "has_upstream" in main and "open_desktop" in main
 if __name__=='__main__':
-    test_default_amniscient_ivory(); test_side_panel_layout(); test_backend_routes_and_slash(); print('ok')
+    test_default_amniscient_ivory(); test_side_panel_layout(); test_backend_routes_and_slash(); test_friction_fixes(); print('ok')

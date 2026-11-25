@@ -16,6 +16,11 @@ cur_b byte[>..] ~= []
 split_on ~= false
 code_on ~= false
 script_open ~= false
+str_of_task(d json::Doc&, n int, key const byte[:]) const byte[:]:
+	m := json::member(d, n, key)
+	s, ok := json::as_string(d, m)
+	if ok: return s
+	return ""
 set_pages(which const byte[:], on_name const byte[:]):
 	root i32 := web::el("tool-cell-a")
 	if root == 0: root = web::el("tool-panel")
@@ -114,10 +119,28 @@ on_tasks():
 		return
 	arr := json::member(d, root, "tasks")
 	h byte[>..] ~= []
-	h.append("<pre>")
-	if arr >= 0: json::format_node(h, d, arr)
-	else: h.append("[]")
-	h.append("</pre>")
+	n := if arr >= 0 { json::count(d, arr) } else { 0 }
+	if n == 0:
+		h.append("No tasks yet.")
+	else:
+		for i n:
+			e := json::element(d, arr, i)
+			id := str_of_task(d, e, "id")
+			title := str_of_task(d, e, "title")
+			status := str_of_task(d, e, "status")
+			detail := str_of_task(d, e, "detail")
+			h.append("<div class='task-row'><div><strong>")
+			md::esc_html(h, title)
+			h.append("</strong> <span class='task-status'>")
+			md::esc_html(h, status)
+			h.append("</span><div class='task-detail'>")
+			md::esc_html(h, detail)
+			h.append("</div></div>")
+			if status != "done" && status != "stopped" && status != "ok" && id.len > 0:
+				h.append("<button data-act='tools.stop' data-arg='")
+				md::esc_html(h, id)
+				h.append("'>Stop</button>")
+			h.append("</div>")
 	web::html(list, h);
 on_doctor():
 	buf byte[>..] ~= []

@@ -10,3 +10,5 @@ The module is namespace `tools`. It owns tags 700 to 799: `T_SESSION` 701 (fetch
 It runs the desktop side panel: Files, Changes, Terminal, Editor and Tasks open as tabs in one panel. Tabs can be split to view two at once (`on` and `on-b` classes) or popped out with `web::open` of "/?panel=" followed by the current tab name. It applies the Amniscient context-snow backdrop by writing the CSS custom property "--ctx-fill" and the status labels "sb-ctx" and "sb-atex" from the session payload. ATEX text is whatever the server sent; this module never invents a savings number.
 
 `init()` boots the panel (honouring the body attribute "data-panel"), fetches "/api/session", starts the timer and listens for keydown on "term-input". `event` and `act` handle the tags and the verbs tab, tab_b, split, pop, term_send, code_mode, stop, doctor, ship and script.
+
+`on_tasks` fills the element "tasks-list". When the "tasks" array is empty it shows "No tasks yet." Otherwise it writes one `div.task-row` per task with the title, status and detail, and a Stop button (`data-act="tools.stop"`) when the status is not done, stopped or ok.

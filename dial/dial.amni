@@ -1,0 +1,513 @@
+import os;
+import gfx;
+import math;
+import json;
+import gfx.codec_png;
+import gfx.sdf_font;
+struct Sess { plat int, n int, dir byte[>..], sid byte[>..], lines byte[>..][>..], size int, shown int, busy bool, demo bool }
+let WRAP = 47;
+let SPIN real = 0.7;
+let RAD f32 = 0.017453292;
+let LNQ f32 = -0.0834;
+let ENVP = "PATH=\"$HOME/.local/bin:$HOME/.opencode/bin:$HOME/.agy/bin:$HOME/.grok/bin:$PATH\"; ";
+var S Sess[>..] = [];
+var AV bool[4];
+var LASTP int[4];
+var ROOT byte[>..] = [];
+var CUR = 0;
+var ROT f32 = 0.0;
+var ROT0 f32 = 0.0;
+var ROT1 f32 = 0.0;
+var T0 real = -9.0;
+var NOW real = 0.0;
+var SCROLL f32 = 0.0;
+var VIEW = 0;
+var HIDE = 0;
+var TICK = 0;
+var INPUT byte[>..] = [];
+var DARK = false;
+var W = 1400;
+var H = 900;
+var CX f32 = 700.0;
+var CY f32 = 450.0;
+var R f32 = 400.0;
+var ADV f32 = 0.6;
+var LOGO TextVtx[>..] = [];
+fn pick(p int, a const byte[:], b const byte[:], c const byte[:], d const byte[:]) const byte[:] { if p == 0 { a } else if p == 1 { b } else if p == 2 { c } else { d } }
+fn pname(p int) const byte[:] { pick(p, "Grok Bot", "Claude Code", "Antigravity", "OpenCode") }
+fn pkey(p int) const byte[:] { pick(p, "grok", "claude", "antigravity", "opencode") }
+fn pexe(p int) const byte[:] { pick(p, "grok", "claude", "agy", "opencode") }
+fn own(s const byte[:]) byte[>..] { var o byte[>..] = []; o.append(s); o }
+fn b8(x f32) byte { clamp(x * 255.0, 0.0, 255.0) as int as byte }
+fn rgba(c float3, a f32) byte[4] { [b8(c.x), b8(c.y), b8(c.z), b8(a)] }
+fn th(k int, a f32) byte[4] {
+	let c = if DARK { if k == 0 { float3 { 0.035, 0.06, 0.13 } } else if k == 1 { float3 { 0.93, 0.87, 0.70 } } else if k == 2 { float3 { 0.91, 0.75, 0.37 } } else if k == 3 { float3 { 0.17, 0.20, 0.31 } } else if k == 4 { float3 { 0.06, 0.09, 0.18 } } else { float3 { 0.0, 0.0, 0.0 } } } else { if k == 0 { float3 { 0.965, 0.945, 0.89 } } else if k == 1 { float3 { 0.24, 0.19, 0.10 } } else if k == 2 { float3 { 0.74, 0.56, 0.16 } } else if k == 3 { float3 { 0.87, 0.81, 0.67 } } else if k == 4 { float3 { 0.995, 0.98, 0.94 } } else { float3 { 0.80, 0.68, 0.42 } } };
+	rgba(c, a)
+}
+fn pc(p int, a f32) byte[4] { rgba(if p == 0 { float3 { 0.33, 0.33, 0.37 } } else if p == 1 { float3 { 0.78, 0.45, 0.29 } } else if p == 2 { float3 { 0.29, 0.50, 0.80 } } else { float3 { 0.36, 0.58, 0.34 } }, a) }
+fn sdir(p int, n int) byte[>..] { str(ROOT[..], "/", pkey(p), "/", n) }
+fn has(exe const byte[:]) bool { run_command(str(ENVP, "command -v ", exe, " >/dev/null 2>&1")[..]) == 0 }
+fn add(p int, n int) int {
+	let d = sdir(p, n);
+	S.push(Sess { plat: p, n: n, dir: copy(d), sid: [], lines: [], size: -1, shown: 0, busy: false, demo: file_exists(str(d[..], "/demo")[..]) });
+	S.len - 1
+}
+fn make(p int) int {
+	var n = 1;
+	while is_dir(sdir(p, n)[..]) { n += 1; }
+	run_command(str("mkdir -p '", sdir(p, n)[..], "'")[..]);
+	add(p, n)
+}
+fn scan() {
+	for p in 4 {
+		var n = 1;
+		while is_dir(sdir(p, n)[..]) { add(p, n); n += 1; }
+		if n == 1 { make(p); }
+	}
+	for p in 4 { LASTP[p] = first(p); }
+}
+fn first(p int) int { var k = -1; for i in S.len { if k < 0 && S[i].plat == p { k = i; } } k }
+fn cnt(p int) int { var k = 0; for s in S { if s.plat == p { k += 1; } } k }
+fn rank(i int) int { var k = 0; for j in i { if S[j].plat == S[i].plat { k += 1; } } k }
+fn nth(p int, r int) int { var k = -1; var c = 0; for i in S.len { if S[i].plat == p { if c == r { k = i; } c += 1; } } k }
+fn wspan(i int) f32 { 90.0 / cnt(S[i].plat) as f32 }
+fn wcenter(i int) f32 { S[i].plat as f32 * 90.0 + (rank(i) as f32 + 0.5) * wspan(i) }
+fn ang(t f32) f32 { (t + ROT - 90.0) * RAD }
+fn wrapd(d f32) f32 { var x = d; while x > 180.0 { x -= 360.0; } while x < -180.0 { x += 360.0; } x }
+fn goto(i int) {
+	let d = wrapd(-wcenter(i) - ROT1);
+	ROT0 = ROT;
+	ROT1 = ROT1 + d;
+	T0 = NOW;
+	CUR = i;
+	LASTP[S[i].plat] = i;
+	VIEW = 0;
+	S[i].shown = vis(i);
+}
+fn step(dir int) { let p = S[CUR].plat; let m = cnt(p); goto(nth(p, (rank(CUR) + dir + m) % m)); }
+fn vis(i int) int { if i == CUR { max(0, S[i].lines.len - HIDE) } else { S[i].lines.len } }
+fn sv(d json::Doc&, n int, k const byte[:]) const byte[:] { let c = json::member(d, n, k); if json::kind(d, c) == json::K_STR { json::text_of(d, c) } else { "" } }
+fn emit(out byte[>..][>..]&, t const byte[:]) {
+	var cur byte[>..] = [];
+	var i = 0;
+	while i <= t.len {
+		let c = if i < t.len { t[i] } else { '\n' };
+		i += 1;
+		if c >= 128 && c < 192 || c == '\r' || c == '`' { continue; }
+		if c == '*' && i < t.len && t[i] == '*' { i += 1; continue; }
+		if c == '\n' {
+			if cur.len > 0 || out.len > 0 && out[out.len - 1].len > 0 { out.push(copy(cur)); }
+			cur = [];
+			continue;
+		}
+		cur.push(if c >= 192 { '?' } else if c == '\t' { ' ' } else { c });
+		if cur.len >= WRAP {
+			var sp = cur.len - 1;
+			while sp > 0 && cur[sp] != ' ' { sp -= 1; }
+			let cut = if sp > WRAP / 2 { sp } else { cur.len };
+			out.push(own(cur[..cut]));
+			cur = own(cur[min(cut + 1, cur.len)..]);
+		}
+	}
+}
+fn event(d json::Doc&, n int, out byte[>..][>..]&, sid byte[>..]&) {
+	let a = sv(d, n, "session_id");
+	let b = if a.len > 0 { a } else { sv(d, n, "sessionID") };
+	let id = if b.len > 0 { b } else { sv(d, n, "conversation_id") };
+	if id.len > 0 { sid.clear(); sid.append(id); }
+	let t = sv(d, n, "type");
+	let part = json::member(d, n, "part");
+	let msg = json::member(d, n, "message");
+	let er = json::member(d, n, "error");
+	if t == "user" { if sv(d, n, "text").len > 0 { out.push([]); emit(out, str("> ", sv(d, n, "text"))[..]); } return; }
+	if t == "assistant" && msg >= 0 {
+		let c = json::member(d, msg, "content");
+		for k in json::count(d, c) {
+			let e = json::element(d, c, k);
+			if sv(d, e, "type") == "text" { emit(out, sv(d, e, "text")); } else if sv(d, e, "type") == "tool_use" { emit(out, str("~ ", sv(d, e, "name"))[..]); }
+		}
+		return;
+	}
+	if part >= 0 {
+		if sv(d, part, "type") == "text" { emit(out, sv(d, part, "text")); } else if sv(d, part, "type") == "tool" { emit(out, str("~ ", sv(d, part, "tool"))[..]); }
+		return;
+	}
+	if t == "result" || t == "system" || t == "stream_event" || t == "step_start" || t == "step_finish" { return; }
+	let ed = json::member(d, er, "data");
+	let em = if json::kind(d, er) == json::K_STR { sv(d, n, "error") } else if sv(d, er, "message").len > 0 { sv(d, er, "message") } else { sv(d, ed, "message") };
+	if em.len > 0 { emit(out, str("! ", em)[..]); return; }
+	let r = sv(d, n, "response");
+	let x = if r.len > 0 { r } else if sv(d, n, "text").len > 0 { sv(d, n, "text") } else { sv(d, n, "output") };
+	if x.len > 0 { emit(out, x); }
+}
+fn refresh(i int) {
+	S[i].busy = file_exists(str(S[i].dir[..], "/busy")[..]);
+	var raw byte[>..] = [];
+	read_file(str(S[i].dir[..], "/log.jsonl")[..], raw);
+	var er byte[>..] = [];
+	read_file(str(S[i].dir[..], "/err.log")[..], er);
+	if raw.len + er.len * 7 == S[i].size { return; }
+	S[i].size = raw.len + er.len * 7;
+	var out byte[>..][>..] = [];
+	var sid byte[>..] = [];
+	var acc byte[>..] = [];
+	var d = json::Doc {};
+	for line in split(raw[..], '\n') {
+		if line.len > 0 && line[0] == '{' { acc.clear(); }
+		acc.append(line);
+		acc.push('\n');
+		let root, msg = json::parse(acc[..], d);
+		if root < 0 { continue; }
+		acc.clear();
+		event(d, root, out, sid);
+	}
+	if er.len > 0 && !S[i].busy { let ls = split(er[..], '\n'); for k in ls.len { if k + 3 >= ls.len && ls[k].len > 0 { emit(out, str("! ", ls[k])[..]); } } }
+	S[i].lines = copy(out);
+	S[i].sid = copy(sid);
+}
+fn cmd(i int) byte[>..] {
+	let d = S[i].dir[..];
+	let sid = S[i].sid[..];
+	let p = S[i].plat;
+	let rs = if sid.len > 0 { str(pick(p, " --session ", " --resume ", " --conversation ", " -s "), sid) } else { str("") };
+	if p == 1 { str("claude -p --output-format stream-json --verbose --permission-mode acceptEdits", rs[..], " < '", d, "/prompt.txt'") } else if p == 2 { str("agy --print \"$(cat '", d, "/prompt.txt')\" --output-format json", rs[..]) } else if p == 3 { str("opencode run --format json ${AMNI_DIAL_OPENCODE_MODEL:+-m $AMNI_DIAL_OPENCODE_MODEL}", rs[..], " < '", d, "/prompt.txt'") } else { str("grok --prompt-file '", d, "/prompt.txt' --output-format streaming-messages-json --permission-mode dontAsk") }
+}
+fn send() {
+	if INPUT.len == 0 || !AV[S[CUR].plat] || S[CUR].busy || S[CUR].demo { return; }
+	let d = S[CUR].dir[..];
+	write_file(str(d, "/prompt.txt")[..], INPUT[..]);
+	var line byte[>..] = [];
+	line.append("{\"type\":\"user\",\"text\":");
+	json::format_string(line, INPUT[..]);
+	line.append("}\n");
+	append_file(str(d, "/log.jsonl")[..], line[..]);
+	write_file(str(d, "/busy")[..], "1");
+	S[CUR].busy = true;
+	run_command(str("(", ENVP, cmd(CUR)[..], " >> '", d, "/log.jsonl' 2>> '", d, "/err.log'; rm -f '", d, "/busy') >/dev/null 2>&1 &")[..]);
+	INPUT.clear();
+	VIEW = 0;
+	refresh(CUR);
+}
+fn seed(path const byte[:]) {
+	var t byte[>..] = [];
+	if !read_file(path, t) { print("no transcript ", path); return; }
+	let i = nth(1, 0);
+	let d = S[i].dir[..];
+	var line byte[>..] = [];
+	line.append("{\"type\":\"user\",\"text\":\"Make one focused improvement to helium-graphics.\"}\n{\"type\":\"replay\",\"text\":");
+	json::format_string(line, t[..]);
+	line.append("}\n");
+	write_file(str(d, "/log.jsonl")[..], line[..]);
+	write_file(str(d, "/demo")[..], "recorded Claude Code run, replayed");
+	S[i].demo = true;
+	S[i].size = -1;
+}
+fn pt(r f32, a f32) float2 { float2 { CX + r * cos(a), CY + r * sin(a) } }
+fn quad(vs TextVtx[>..]&, p0 float2, p1 float2, p2 float2, p3 float2, c byte[4]) {
+	let n = float2 { -1.0, -1.0 };
+	vs.append([TextVtx { pos: p0, uv: n, col: c }, TextVtx { pos: p1, uv: n, col: c }, TextVtx { pos: p2, uv: n, col: c }, TextVtx { pos: p0, uv: n, col: c }, TextVtx { pos: p2, uv: n, col: c }, TextVtx { pos: p3, uv: n, col: c }]);
+}
+fn band(vs TextVtx[>..]&, r0 f32, r1 f32, a0 f32, a1 f32, c byte[4]) {
+	let n = max(1, (abs(a1 - a0) / 0.02) as int + 1);
+	for k in n {
+		let u0 = a0 + (a1 - a0) * k as f32 / n as f32;
+		let u1 = a0 + (a1 - a0) * (k + 1) as f32 / n as f32;
+		quad(vs, pt(r0, u0), pt(r1, u0), pt(r1, u1), pt(r0, u1), c);
+	}
+}
+fn disc(vs TextVtx[>..]&, x f32, y f32, r f32, c byte[4]) { let ox = CX; let oy = CY; CX = x; CY = y; band(vs, 0.0, r, 0.0, 6.2832, c); CX = ox; CY = oy; }
+fn spoke(vs TextVtx[>..]&, a f32, r0 f32, r1 f32, w f32, c byte[4]) {
+	let nx = -sin(a) * w * 0.5;
+	let ny = cos(a) * w * 0.5;
+	let p = pt(r0, a);
+	let q = pt(r1, a);
+	quad(vs, float2 { p.x - nx, p.y - ny }, float2 { q.x - nx, q.y - ny }, float2 { q.x + nx, q.y + ny }, float2 { p.x + nx, p.y + ny }, c);
+}
+fn arctext(vs TextVtx[>..]&, t const byte[:], r f32, a f32, size f32, c byte[4], weight int, tilt f32, center bool) {
+	let from = vs.len;
+	sdf_text(vs, 0.0, 0.0, size, t, c, weight, false);
+	let fl = center && sin(a) > 0.25;
+	let hw = sdf_text_w(t, size) * 0.5 / r;
+	let a0 = if fl { a + hw } else if center { a - hw } else { a };
+	let sh = th(5, c[3] as f32 / 255.0 * (if DARK { 0.7 } else { 0.35 }));
+	var i = from;
+	while i < vs.len {
+		let p = vs[i].pos;
+		vs[i].pos = if fl { pt(r - size * tilt + p.y * tilt, a0 - p.x / r) } else { pt(r - p.y * tilt, a0 + p.x / r) };
+		if vs[i].col[0] == 0 && vs[i].col[1] == 0 && vs[i].col[2] == 0 { vs[i].col = sh; }
+		i += 1;
+	}
+}
+fn flat(vs TextVtx[>..]&, x f32, y f32, size f32, t const byte[:], c byte[4], weight int) { let from = vs.len; sdf_text(vs, x, y, size, t, c, weight, false); var i = from; while i < vs.len { if vs[i].col[0] == 0 && vs[i].col[1] == 0 && vs[i].col[2] == 0 { vs[i].col = th(5, c[3] as f32 / 255.0 * 0.3); } i += 1; } }
+fn rect(vs TextVtx[>..]&, x f32, y f32, w f32, h f32, c byte[4]) { sdf_rect(vs, x, y, w, h, c); }
+fn logo() {
+	var px byte[>..] = [];
+	let w, h, ok = codec_png::decode(embed_file("amniscient-logo.png"), px);
+	if !ok { return; }
+	let ch = px.len / (w * h);
+	let g = 112;
+	let n = float2 { -1.0, -1.0 };
+	for y in g {
+		for x in g {
+			var s float3 = float3 { 0.0, 0.0, 0.0 };
+			var lo f32 = 0.0;
+			for k in 4 {
+				let o = ((y * h / g + k % 2 * 4) * w + x * w / g + k / 2 * 4) * ch;
+				let c = float3 { px[o] as f32 / 255.0, px[o + 1] as f32 / 255.0, px[o + 2] as f32 / 255.0 };
+				s = s + c * 0.25;
+				lo += (1.0 - min(c.x, c.y, c.z)) * 0.25;
+			}
+			let a = clamp(lo * 2.2, 0.0, 1.0);
+			if a < 0.05 { continue; }
+			let col = rgba(s, a);
+			let x0 = x as f32 / g as f32 * 2.0 - 1.0;
+			let y0 = y as f32 / g as f32 * 2.0 - 1.0;
+			let e = 2.0 / g as f32;
+			LOGO.append([TextVtx { pos: float2 { x0, y0 }, uv: n, col: col }, TextVtx { pos: float2 { x0 + e, y0 }, uv: n, col: col }, TextVtx { pos: float2 { x0 + e, y0 + e }, uv: n, col: col }, TextVtx { pos: float2 { x0, y0 }, uv: n, col: col }, TextVtx { pos: float2 { x0 + e, y0 + e }, uv: n, col: col }, TextVtx { pos: float2 { x0, y0 + e }, uv: n, col: col }]);
+		}
+	}
+}
+fn status(i int) byte[>..] {
+	let p = S[i].plat;
+	if S[i].demo { str("DEMO REPLAY - recorded Claude Code run") } else if !AV[p] { if p == 0 { str("no public Grok Bot API - install the grok CLI to drive this sector") } else { str(pexe(p), " not installed - adapter ready") } } else if S[i].busy { str("working", pick((TICK / 9) % 4, "", ".", "..", "...")) } else { str("live - Enter sends") }
+}
+fn draw(t gfx::Texture) {
+	let bg = th(0, 1.0);
+	guard gfx::begin_pass(t, gfx::Texture { 0 }, float4 { bg[0] as f32 / 255.0, bg[1] as f32 / 255.0, bg[2] as f32 / 255.0, 1.0 }) else { return; }
+	gfx::end_pass();
+	CX = W as f32 * 0.5;
+	CY = H as f32 * 0.51;
+	R = min(W as f32 * 0.5, H as f32 * 0.5) * 0.86;
+	let hub = R * 0.2;
+	let rim = R * 1.075;
+	var vs TextVtx[>..] = [];
+	disc(vs, CX, CY, rim + R * 0.012, th(2, 0.9));
+	disc(vs, CX, CY, rim, th(4, 1.0));
+	let top = -1.5708;
+	let span = WRAP as f32 * ADV * 0.04 + 0.08;
+	for i in S.len {
+		let c = ang(wcenter(i));
+		let hw = wspan(i) * 0.5 * RAD;
+		let on = i == CUR;
+		band(vs, hub, R, c - hw, c + hw, if on { th(2, 0.16) } else { pc(S[i].plat, if rank(i) % 2 == 0 { 0.07 } else { 0.12 }) });
+		spoke(vs, c - hw, hub, R, if rank(i) == 0 { 3.0 } else { 1.0 }, if rank(i) == 0 { th(2, 0.9) } else { th(2, 0.35) });
+	}
+	let ca = ang(wcenter(CUR));
+	band(vs, hub * 1.05, R * 0.99, ca - span * 0.5 - 0.03, ca + span * 0.5 + 0.03, th(4, 0.82));
+	for i in S.len {
+		let c = ang(wcenter(i));
+		let wd = wspan(i) * RAD;
+		let dd = abs(wrapd((c - ca) / RAD)) * RAD;
+		if i == CUR || dd < span * 0.5 + wd * 0.3 { continue; }
+		let fade = clamp((dd - span * 0.5 - wd * 0.3) / 0.4, 0.0, 1.0);
+		arctext(vs, str(pname(S[i].plat), " #", S[i].n)[..], R * 0.95, c, R * 0.026, pc(S[i].plat, 0.9 * fade), 1, 1.0, true);
+		let n = S[i].lines.len;
+		for k in 5 {
+			let idx = n - 1 - k;
+			if idx < 0 { break; }
+			let r = R * 0.86 * exp(LNQ * 1.6 * k as f32);
+			let size = r * 0.024;
+			let maxc = max(4, (wd * 0.86 * r / (size * ADV)) as int);
+			let l = S[i].lines[idx][..];
+			arctext(vs, l[..min(l.len, maxc)], r, c, size, th(1, 0.7 * fade * (1.0 - k as f32 * 0.15)), 0, 1.0, true);
+		}
+		if n == 0 { arctext(vs, status(i)[..min(status(i).len, max(4, (wd * 0.86 * R * 0.7 / (R * 0.018 * ADV)) as int))], R * 0.7, c, R * 0.018, th(1, 0.45 * fade), 0, 1.0, true); }
+	}
+	let n = vis(CUR);
+	for k in 60 {
+		let idx = n - 1 - VIEW - k;
+		if idx < 0 { break; }
+		let pos = k as f32 + 1.0 - SCROLL;
+		let r = R * 0.9 * exp(LNQ * pos);
+		if r < hub * 1.12 { break; }
+		let fade = clamp((r - hub * 1.12) / (R * 0.3), 0.0, 1.0) * clamp((R * 0.93 - r) / (R * 0.05), 0.0, 1.0);
+		let l = S[CUR].lines[idx][..];
+		let kind = if l.len > 1 && l[0] == '>' && l[1] == ' ' { 1 } else if l.len > 1 && l[0] == '~' { 2 } else if l.len > 1 && l[0] == '!' { 3 } else { 0 };
+		let c = if kind == 1 { th(2, fade) } else if kind == 2 { th(2, 0.6 * fade) } else if kind == 3 { rgba(float3 { 0.75, 0.22, 0.18 }, fade) } else { th(1, fade) };
+		arctext(vs, l, r, ca, r * 0.04, c, if kind == 1 { 1 } else { 0 }, 0.55 + 0.45 * r / R, true);
+	}
+	let blink = if (TICK / 20) % 2 == 0 { "_" } else { " " };
+	let p = S[CUR].plat;
+	let prompt = if AV[p] && !S[CUR].demo { str("> ", INPUT[max(0, INPUT.len - WRAP + 4)..], blink) } else { status(CUR) };
+	arctext(vs, prompt[..], R * 0.975, ca, R * 0.036, th(2, 1.0), 1, 1.0, true);
+	band(vs, R * 0.995, R * 1.0, 0.0, 6.2832, th(2, 0.8));
+	for q in 4 {
+		let a0 = ang(q as f32 * 90.0);
+		let a1 = ang(q as f32 * 90.0 + 90.0);
+		band(vs, R * 1.005, rim, a0 + 0.004, a1 - 0.004, pc(q, if q == p { 0.95 } else { 0.55 }));
+		arctext(vs, str(pname(q), "  ", cnt(q))[..], rim - R * 0.02, (a0 + a1) * 0.5, R * 0.032, rgba(float3 { 1.0, 0.98, 0.93 }, 1.0), 1, 1.0, true);
+	}
+	disc(vs, CX, CY, hub * 1.06, th(2, 0.95));
+	disc(vs, CX, CY, hub, rgba(float3 { 0.995, 0.985, 0.955 }, 1.0));
+	let base = vs.len;
+	vs.append(LOGO[..]);
+	var i = base;
+	while i < vs.len { vs[i].pos = float2 { CX + vs[i].pos.x * hub * 0.9, CY + vs[i].pos.y * hub * 0.9 }; i += 1; }
+	for s in 2 {
+		let ax = if s == 0 { CX - rim - R * 0.13 } else { CX + rim + R * 0.13 };
+		let d = if s == 0 { -1.0 } else { 1.0 };
+		disc(vs, ax, CY, R * 0.075, th(2, 0.95));
+		disc(vs, ax, CY, R * 0.068, th(4, 1.0));
+		let e = R * 0.035;
+		let nn = float2 { -1.0, -1.0 };
+		let cc = th(2, 1.0);
+		vs.append([TextVtx { pos: float2 { ax + d * e, CY }, uv: nn, col: cc }, TextVtx { pos: float2 { ax - d * e * 0.6, CY - e }, uv: nn, col: cc }, TextVtx { pos: float2 { ax - d * e * 0.6, CY + e }, uv: nn, col: cc }]);
+	}
+	flat(vs, 28.0, 30.0, 26.0, "AMNI DIAL", th(2, 1.0), 1);
+	flat(vs, 28.0, 70.0, 17.0, str(pname(p), " #", S[CUR].n, "  ", rank(CUR) + 1, "/", cnt(p))[..], th(1, 1.0), 1);
+	flat(vs, 28.0, 98.0, 13.0, status(CUR)[..min(status(CUR).len, 44)], th(1, 0.7), 0);
+	for q in 4 {
+		let y = H as f32 - 214.0 + q as f32 * 48.0;
+		let on = q == p;
+		rect(vs, 24.0, y, 236.0, 40.0, if on { th(2, 1.0) } else { th(2, 0.45) });
+		rect(vs, 26.0, y + 2.0, 232.0, 36.0, if on { th(2, 1.0) } else { th(4, 1.0) });
+		rect(vs, 26.0, y + 2.0, 6.0, 36.0, pc(q, 1.0));
+		let tc = if on { th(0, 1.0) } else { th(1, if AV[q] { 1.0 } else { 0.45 }) };
+		flat(vs, 42.0, y + 13.0, 15.0, str(q + 1, "  ", pname(q))[..], tc, 1);
+		rect(vs, 222.0, y + 6.0, 30.0, 28.0, if on { th(0, 0.9) } else { th(2, 0.25) });
+		flat(vs, 230.0, y + 12.0, 16.0, "+", th(2, 1.0), 1);
+	}
+	let hint = "<- ->  session    1-4  platform    + / Ctrl+N  new    Ctrl+T  theme    Enter  send";
+	flat(vs, W as f32 - sdf_text_w(hint, 12.0) - 28.0, H as f32 - 34.0, 12.0, hint, th(1, 0.6), 0);
+	sdf_draw(t, W, H, vs);
+}
+fn update(dt real) {
+	TICK += 1;
+	if TICK % 8 == 1 { for i in S.len { refresh(i); } }
+	let u = clamp((NOW - T0) / SPIN, 0.0, 1.0);
+	let e = if u < 0.5 { 4.0 * u * u * u } else { 1.0 - pow(-2.0 * u + 2.0, 3.0) / 2.0 };
+	ROT = ROT0 + (ROT1 - ROT0) * e as f32;
+	let n = vis(CUR);
+	if n > S[CUR].shown { SCROLL = min(SCROLL + (n - S[CUR].shown) as f32, 7.0); }
+	S[CUR].shown = n;
+	SCROLL = SCROLL * exp(-7.0 * dt as f32);
+}
+fn spawn(p int) { goto(make(p)); }
+fn click(m float2) {
+	let rim = R * 1.075;
+	for s in 2 { let ax = if s == 0 { CX - rim - R * 0.13 } else { CX + rim + R * 0.13 }; if abs(m.x - ax) < R * 0.08 && abs(m.y - CY) < R * 0.08 { step(if s == 0 { -1 } else { 1 }); return; } }
+	for q in 4 {
+		let y = H as f32 - 214.0 + q as f32 * 48.0;
+		if m.y >= y && m.y < y + 40.0 && m.x >= 24.0 && m.x < 260.0 { if m.x >= 218.0 { spawn(q); } else { goto(LASTP[q]); } return; }
+	}
+	let dx = m.x - CX;
+	let dy = m.y - CY;
+	let r = sqrt(dx * dx + dy * dy);
+	if r > R * 0.2 && r < rim {
+		let th0 = atan2(dy, dx) / RAD + 90.0 - ROT;
+		for i in S.len { if abs(wrapd(th0 - wcenter(i))) <= wspan(i) * 0.5 { goto(i); return; } }
+	}
+}
+fn interactive() {
+	if !gfx::open("Amni Dial", W, H) { print("no window: ", gfx::error()); return; }
+	gfx::text_input(true);
+	var last = gfx::time();
+	while gfx::frame() {
+		NOW = gfx::time();
+		let ctrl = gfx::key_down("Left Ctrl") || gfx::key_down("Right Ctrl");
+		for ev in gfx::events() {
+			if ev.kind == 2 && !ctrl {
+				let c = ev.codepoint;
+				if INPUT.len == 0 && c >= 49 && c <= 52 { goto(LASTP[(c - 49) as int]); } else if INPUT.len == 0 && c == 43 { spawn(S[CUR].plat); } else if c >= 32 && c < 127 { INPUT.push(c as byte); }
+			}
+			if ev.kind == 1 && ev.down && ev.scancode == gfx::scancode("Backspace") as i32 && INPUT.len > 0 { INPUT.pop(); }
+		}
+		if gfx::key_pressed("Left") { step(-1); }
+		if gfx::key_pressed("Right") { step(1); }
+		if gfx::key_pressed("Up") || gfx::key_pressed("PageUp") { VIEW = min(VIEW + 3, max(0, S[CUR].lines.len - 1)); }
+		if gfx::key_pressed("Down") || gfx::key_pressed("PageDown") { VIEW = max(0, VIEW - 3); }
+		if gfx::key_pressed("Return") { send(); }
+		if ctrl && gfx::key_pressed("N") { spawn(S[CUR].plat); }
+		if ctrl && gfx::key_pressed("T") { DARK = !DARK; }
+		if gfx::key_pressed("Escape") { gfx::quit(); }
+		let wh = gfx::mouse_wheel();
+		if wh != 0.0 { VIEW = clamp(VIEW + (wh * 2.0) as int, 0, max(0, S[CUR].lines.len - 1)); }
+		if gfx::mouse_pressed(1) { click(gfx::mouse_pos()); }
+		update(NOW - last);
+		last = NOW;
+		draw(gfx::screen());
+	}
+	gfx::close();
+}
+fn shot(t gfx::Texture, dir const byte[:], name const byte[:]) { update(1.0 / 30.0); draw(t); gfx::save_png(t, str(dir, "/", name)[..]); }
+var FR = 0;
+fn film(t gfx::Texture, dir const byte[:], frames int) {
+	for k in frames {
+		NOW += 1.0 / 30.0;
+		update(1.0 / 30.0);
+		draw(t);
+		gfx::save_png(t, str(dir, "/frames/f", if FR < 10 { "000" } else if FR < 100 { "00" } else if FR < 1000 { "0" } else { "" }, FR, ".png")[..]);
+		FR += 1;
+		gfx::flush();
+	}
+}
+fn shots(dir const byte[:]) {
+	run_command(str("mkdir -p '", dir, "/frames'")[..]);
+	if !gfx::open_headless(W, H) { print("no gpu: ", gfx::error()); return; }
+	let t = gfx::render_target(W, H, gfx::RGBA8);
+	var oc = nth(3, 0);
+	let asks = ["In 7 short lines: what makes a polar UI readable?", "Write a 12 line Helium-style haiku sequence about a spinning dial of agents.", "List 7 terse tips for driving several coding agents at once."];
+	if AV[3] {
+		for k in 3 {
+			let i = if k < cnt(3) { nth(3, k) } else { make(3) };
+			refresh(i);
+			if S[i].lines.len == 0 { CUR = i; INPUT = own(asks[k]); send(); }
+		}
+		var waited = 0;
+		var any = true;
+		while any && waited < 240 { any = false; for i in S.len { refresh(i); if S[i].busy { any = true; } } sleep_ms(500); waited += 1; }
+	}
+	for i in S.len { S[i].size = -1; refresh(i); }
+	let cc = nth(1, 0);
+	goto(cc);
+	ROT = ROT1;
+	ROT0 = ROT1;
+	T0 = -9.0;
+	shot(t, dir, "dial-rest.png");
+	HIDE = min(S[cc].lines.len, 34);
+	S[cc].shown = vis(cc);
+	SCROLL = 0.0;
+	film(t, dir, 7);
+	while HIDE > 0 { HIDE -= 1; film(t, dir, 4); }
+	film(t, dir, 14);
+	shot(t, dir, "dial-crawl.png");
+	goto(nth(3, 0));
+	film(t, dir, 10);
+	shot(t, dir, "dial-spin.png");
+	film(t, dir, 21);
+	shot(t, dir, "dial-opencode.png");
+	step(1);
+	film(t, dir, 28);
+	step(1);
+	film(t, dir, 28);
+	goto(LASTP[2]);
+	film(t, dir, 28);
+	goto(nth(0, 0));
+	film(t, dir, 28);
+	goto(cc);
+	film(t, dir, 28);
+	DARK = true;
+	shot(t, dir, "dial-dark.png");
+	gfx::close();
+}
+fn main() {
+	let a = args();
+	var home byte[>..] = [];
+	env("HOME", home);
+	if !env("AMNI_DIAL_HOME", ROOT) || ROOT.len == 0 { ROOT = str(home[..], "/.amni-dial"); }
+	for p in 4 { AV[p] = has(pexe(p)); }
+	ADV = sdf_text_w("the quick brown fox jumps over a lazy dog 0123456789", 100.0) / 100.0 / 52.0;
+	scan();
+	logo();
+	var dir byte[>..] = [];
+	for k in a.len {
+		if a[k] == "--dark" { DARK = true; }
+		if a[k] == "--seed" && k + 1 < a.len { seed(a[k + 1]); }
+		if a[k] == "--shots" && k + 1 < a.len { dir = own(a[k + 1]); }
+	}
+	for i in S.len { refresh(i); }
+	CUR = first(1);
+	goto(CUR);
+	ROT = ROT1;
+	if dir.len > 0 { shots(dir[..]); } else { interactive(); }
+}

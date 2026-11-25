@@ -2364,6 +2364,7 @@ fn open_desktop(ui_url:&str)->bool{if std::env::var("WAYLAND_DISPLAY").is_ok()&&
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    if std::env::args().nth(1).as_deref() == Some("dial") { let me = std::env::current_exe().ok().and_then(|e| e.parent().map(|d| d.join("amni-dial"))).filter(|p| p.is_file()).unwrap_or_else(|| "amni-dial".into()); std::process::exit(std::process::Command::new(me).args(std::env::args().skip(2)).status().map(|s| s.code().unwrap_or(1)).unwrap_or(127)); }
     let args:Vec<String>=std::env::args().collect();
     match parse_early(&args){Early::Help=>{print!("{}",usage());std::process::exit(0);}Early::Version=>{println!("Amni-Code {}",env!("CARGO_PKG_VERSION"));std::process::exit(0);}Early::Bad(f)=>{eprint!("unknown option: {f}\n\n{}",usage());std::process::exit(2);}Early::Run=>{}}
     tracing_subscriber::fmt::init();

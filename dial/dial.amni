@@ -572,7 +572,9 @@ fn main() {
 	scan();
 	logo();
 	var dir byte[>..] = [];
+	var ask = -1;
 	for k in a.len {
+		if a[k] == "--send" && k + 2 < a.len { ask = clamp(to_int(a[k + 1]) - 1, 0, 3); INPUT = own(a[k + 2]); }
 		if a[k] == "--dark" { DARK = true; }
 		if a[k] == "--seed" && k + 1 < a.len { seed(a[k + 1]); }
 		if a[k] == "--shots" && k + 1 < a.len { dir = own(a[k + 1]); }
@@ -581,5 +583,12 @@ fn main() {
 	CUR = first(1);
 	goto(CUR);
 	ROT = ROT1;
-	if dir.len > 0 { shots(dir[..]); } else { interactive(); }
+	if ask >= 0 {
+		goto(LASTP[ask]);
+		send();
+		var w = 0;
+		while S[CUR].busy && w < 480 { sleep_ms(500); refresh(CUR); w += 1; }
+		for l in S[CUR].lines { print(l[..]); }
+	}
+	if dir.len > 0 { shots(dir[..]); } else if ask < 0 { shots(dir[..]); } else { interactive(); }
 }
